@@ -107,22 +107,23 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
   return (
     <>
       {/* 遮罩层 */}
-      <div className="fixed inset-0 bg-black/40 z-50" onClick={handleCancel} />
+      <div className="fixed inset-0 bg-black/40 z-[55]" onClick={handleCancel} />
 
       {/* 面板 */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl max-h-[90vh] overflow-y-auto animate-slide-up">
+      <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl max-h-[85vh] flex flex-col animate-slide-up">
         {/* 拖拽条 */}
-        <div className="flex justify-center pt-2 pb-1">
+        <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
           <div className="w-10 h-1 bg-gray-300 rounded-full" />
         </div>
 
-        <div className="px-5 pb-8">
-          {/* 标题 */}
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-amber-900">记录新食材</h2>
-            <button onClick={handleCancel} className="text-gray-400 text-2xl">✕</button>
-          </div>
+        {/* 标题 */}
+        <div className="flex items-center justify-between px-5 pb-3 flex-shrink-0">
+          <h2 className="text-lg font-bold text-amber-900">记录新食材</h2>
+          <button onClick={handleCancel} className="text-gray-400 text-2xl">✕</button>
+        </div>
 
+        {/* 可滚动内容 */}
+        <div className="flex-1 overflow-y-auto px-5 pb-4">
           {/* 日期 */}
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">日期</label>
@@ -228,7 +229,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
           </div>
 
           {/* 备注 */}
-          <div className="mb-6">
+          <div className="mb-2">
             <label className="text-sm text-amber-800 font-medium mb-1 block">备注</label>
             <textarea
               value={note}
@@ -238,8 +239,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
               className="w-full px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 placeholder-amber-300 resize-none"
             />
           </div>
+        </div>
 
-          {/* 按钮组 */}
+        {/* 按钮组 - 固定底部 */}
+        <div className="flex-shrink-0 px-5 pb-5 pt-3 border-t border-amber-100 bg-white">
           <div className="flex gap-3">
             <button
               onClick={handleCancel}

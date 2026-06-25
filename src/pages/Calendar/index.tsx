@@ -62,13 +62,7 @@ const CalendarPage: React.FC = () => {
     <div className="min-h-screen bg-[#FFF8F0] pb-20">
       {/* 月份导航 */}
       <div className="bg-gradient-to-b from-orange-100 to-[#FFF8F0] px-5 pt-4 pb-3">
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            onClick={() => window.history.length > 1 ? window.history.back() : null}
-            className="w-9 h-9 rounded-full bg-orange-400/80 shadow-sm flex items-center justify-center text-white text-sm flex-shrink-0"
-          >
-            ←
-          </button>
+        <div className="flex items-center justify-between mb-2">
           <span className="text-lg font-bold text-amber-900">📅 日历</span>
         </div>
         <div className="flex items-center justify-between">

@@ -71,15 +71,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
     <div className="min-h-screen bg-[#FFF8F0] pb-20">
       {/* 顶部标题 */}
       <div className="bg-gradient-to-b from-orange-100 to-[#FFF8F0] px-5 pt-4 pb-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => window.history.length > 1 ? window.history.back() : null}
-            className="w-9 h-9 rounded-full bg-orange-400/80 shadow-sm flex items-center justify-center text-white text-sm flex-shrink-0"
-          >
-            ←
-          </button>
-          <h1 className="text-xl font-bold text-amber-900">🍼 宝宝饮食记录</h1>
-        </div>
+        <h1 className="text-xl font-bold text-amber-900">🍼 宝宝饮食记录</h1>
       </div>
 
       <div className="px-4 space-y-4">
