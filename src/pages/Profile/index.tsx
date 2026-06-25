@@ -22,6 +22,8 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const [tempName, setTempName] = useState(profile.name);
   const [tempBirthday, setTempBirthday] = useState(profile.birthday);
   const [showRecords, setShowRecords] = useState(false);
+  // 当前浮层筛选的分类：null=全部, 'safe'/'observing'/'suspected'/'allergic'
+  const [statFilter, setStatFilter] = useState<string | null>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
 
   const stats = getStats();
@@ -230,7 +232,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
           <div className="space-y-3">
             {/* 总记录次数 — 可点击展开查看所有排敏记录 */}
             <button
-              onClick={() => setShowRecords(true)}
+              onClick={() => { setShowRecords(true); setStatFilter(null); }}
               className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
             >
               <div className="flex items-center gap-2">
@@ -243,22 +245,46 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
               </div>
             </button>
 
-            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+            <button
+              onClick={() => { setShowRecords(true); setStatFilter('safe'); }}
+              className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
+            >
               <span className="text-sm text-amber-700">排敏完成（不过敏）</span>
-              <span className="text-lg font-bold text-green-500">{stats.safe}</span>
-            </div>
-            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-bold text-green-500">{stats.safe}</span>
+                <span className="text-amber-300">›</span>
+              </div>
+            </button>
+            <button
+              onClick={() => { setShowRecords(true); setStatFilter('observing'); }}
+              className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
+            >
               <span className="text-sm text-amber-700">排敏中</span>
-              <span className="text-lg font-bold text-yellow-500">{stats.observing}</span>
-            </div>
-            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-bold text-yellow-500">{stats.observing}</span>
+                <span className="text-amber-300">›</span>
+              </div>
+            </button>
+            <button
+              onClick={() => { setShowRecords(true); setStatFilter('suspected'); }}
+              className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
+            >
               <span className="text-sm text-amber-700">疑似过敏</span>
-              <span className="text-lg font-bold text-amber-500">{stats.suspected}</span>
-            </div>
-            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-bold text-amber-500">{stats.suspected}</span>
+                <span className="text-amber-300">›</span>
+              </div>
+            </button>
+            <button
+              onClick={() => { setShowRecords(true); setStatFilter('allergic'); }}
+              className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
+            >
               <span className="text-sm text-amber-700">过敏源</span>
-              <span className="text-lg font-bold text-red-500">{stats.allergic}</span>
-            </div>
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-bold text-red-500">{stats.allergic}</span>
+                <span className="text-amber-300">›</span>
+              </div>
+            </button>
           </div>
 
           <div className="mt-3 pt-3 border-t border-amber-100">
@@ -301,14 +327,41 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       {/* ============ 查看所有排敏记录浮层 ============ */}
       {showRecords && allRecordsData && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowRecords(false)} />
+          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => { setShowRecords(false); setStatFilter(null); }} />
           <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
-                所有排敏记录
+                {statFilter === 'safe' && '排敏完成（不过敏）'}
+                {statFilter === 'observing' && '排敏中'}
+                {statFilter === 'suspected' && '疑似过敏'}
+                {statFilter === 'allergic' && '过敏食物'}
+                {!statFilter && '所有排敏记录'}
                 <span className="text-xs text-amber-400 ml-2">共 {allRecordsData.total} 种食物</span>
               </h2>
-              <button onClick={() => setShowRecords(false)} className="text-gray-400 text-2xl">✕</button>
+              <button onClick={() => { setShowRecords(false); setStatFilter(null); }} className="text-gray-400 text-2xl">✕</button>
+            </div>
+
+            {/* 筛选标签 */}
+            <div className="px-5 py-2 flex gap-2 flex-shrink-0 border-b border-amber-50 overflow-x-auto">
+              {[
+                { key: null, label: '全部' },
+                { key: 'safe', label: '已排敏' },
+                { key: 'observing', label: '排敏中' },
+                { key: 'suspected', label: '疑似过敏' },
+                { key: 'allergic', label: '过敏' },
+              ].map((opt) => (
+                <button
+                  key={opt.key ?? 'all'}
+                  onClick={() => setStatFilter(opt.key)}
+                  className={`text-xs px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
+                    statFilter === opt.key
+                      ? 'bg-orange-400 text-white'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1">
@@ -324,10 +377,17 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                   { key: 'suspected', label: '疑似过敏（待回避触发实验）', foods: grouped.suspected, color: '#F59E0B' },
                   { key: 'observing', label: '排敏中', foods: grouped.observing, color: '#FFB347' },
                   { key: 'allergic', label: '过敏', foods: grouped.allergic, color: '#FF6B6B' },
-                ];
+                ].filter(s => !statFilter || s.key === statFilter);
 
                 return sections.map(section => {
-                  if (section.foods.length === 0) return null;
+                  if (section.foods.length === 0) {
+                    return (
+                      <div key={section.key} className="text-center py-6 text-amber-400">
+                        <div className="text-3xl mb-2">🍽️</div>
+                        <p className="text-sm">该分类暂无食物</p>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={section.key} className="mb-4">
                       <div className="flex items-center gap-2 mb-2">

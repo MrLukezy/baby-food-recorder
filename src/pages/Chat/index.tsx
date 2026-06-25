@@ -25,12 +25,11 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
   const [streamingText, setStreamingText] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSupported, setRecordingSupported] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<any>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 用 ref 追踪正在流式输出的会话 ID，防止切换后把文本显示到别的会话
+  const streamingConvIdRef = useRef<string | null>(null);
 
   const aiInfo = getAIInfo();
 
@@ -55,39 +54,15 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConv?.messages, streamingText]);
 
-  // 检测语音识别支持
-  useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setRecordingSupported(false);
-      return;
-    }
-    const recognition = new SR();
-    recognition.lang = 'zh-CN';
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: any) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      setInput(prev => prev + transcript);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('语音识别错误:', event.error);
-      setIsRecording(false);
-    };
-
-    recognitionRef.current = recognition;
-  }, []);
-
   const handleNewConversation = () => {
+    // 切换前如果正在流式输出，先中止并清除
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setIsStreaming(false);
+      setStreamingText('');
+      streamingConvIdRef.current = null;
+    }
     const conv = createConversation('新对话 ' + new Date().toLocaleDateString('zh-CN'));
     setConversations(getConversations());
     setActiveId(conv.id);
@@ -96,6 +71,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
   };
 
   const handleSelectConversation = (id: string) => {
+    // 切换前如果正在流式输出，先中止并清除
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setIsStreaming(false);
+      setStreamingText('');
+      streamingConvIdRef.current = null;
+    }
     setActiveId(id);
     setActiveConv(getConversation(id));
     setActiveConversationId(id);
@@ -105,6 +88,16 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
   const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('确定删除这个对话？')) return;
+
+    // 如果删除的是正在流式输出的会话，先中止
+    if (abortRef.current && streamingConvIdRef.current === id) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setIsStreaming(false);
+      setStreamingText('');
+      streamingConvIdRef.current = null;
+    }
+
     deleteConversation(id);
     const list = getConversations();
     setConversations(list);
@@ -167,7 +160,8 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       ...newMessages.slice(-10),
     ];
 
-    // 流式调用
+    // 流式调用：标记当前正在为哪个会话流式输出
+    streamingConvIdRef.current = convId;
     setIsStreaming(true);
     setStreamingText('');
     abortRef.current = new AbortController();
@@ -176,7 +170,10 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       const finalText = await chatCompletion(
         apiMessages,
         (partial) => {
-          setStreamingText(partial);
+          // 只在还在同一会话时才更新流式文本
+          if (streamingConvIdRef.current === convId) {
+            setStreamingText(partial);
+          }
         },
         abortRef.current.signal
       );
@@ -184,7 +181,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       const assistantMsg: ChatMessage = { role: 'assistant', content: finalText };
       const finalMessages = [...newMessages, assistantMsg];
       updateConversation(convId, { messages: finalMessages });
-      setActiveConv({ ...updatedConv, messages: finalMessages });
+
+      // 如果当前还显示这个会话，刷新列表；否则只更新 localStorage，UI 不刷新
+      setActiveConv(prev => {
+        if (prev && prev.id === convId) {
+          return { ...prev, messages: finalMessages };
+        }
+        return prev;
+      });
       setConversations(getConversations());
 
       // 自动保存重要信息到记忆
@@ -197,11 +201,17 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
         };
         const finalMessages = [...newMessages, errorMsg];
         updateConversation(convId, { messages: finalMessages });
-        setActiveConv({ ...updatedConv, messages: finalMessages });
+        setActiveConv(prev => {
+          if (prev && prev.id === convId) {
+            return { ...prev, messages: finalMessages };
+          }
+          return prev;
+        });
       }
     } finally {
       setIsStreaming(false);
       setStreamingText('');
+      streamingConvIdRef.current = null;
       abortRef.current = null;
     }
   };
@@ -233,18 +243,6 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
     }
   };
 
-  // ============ 语音输入 ============
-
-  const handleVoiceInput = () => {
-    if (!recognitionRef.current) return;
-    if (isRecording) {
-      recognitionRef.current.stop();
-    } else {
-      recognitionRef.current.start();
-      setIsRecording(true);
-    }
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -254,6 +252,8 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
 
   const displayMessages = activeConv?.messages || [];
   const memories = getMemories();
+  // 只当当前正在显示的 activeId 就是正在流式输出的那个会话时，才显示流式 UI
+  const showStreamingUI = isStreaming && streamingConvIdRef.current === activeId;
 
   return (
     <div className="h-screen bg-[#FFF8F0] flex flex-col max-w-lg mx-auto relative">
@@ -330,13 +330,13 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
           ))
         )}
 
-        {/* 流式输出中 */}
-        {isStreaming && streamingText && (
+        {/* 流式输出中：仅当本会话正在流式输出时显示 */}
+        {showStreamingUI && streamingText && (
           <MessageBubble
             message={{ role: 'assistant', content: streamingText + ' ▍' }}
           />
         )}
-        {isStreaming && !streamingText && (
+        {showStreamingUI && !streamingText && (
           <div className="flex items-start gap-2">
             <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-sm flex-shrink-0">
               🤖
@@ -357,29 +357,17 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       {/* 输入区 */}
       <div className="px-4 py-3 bg-white border-t border-amber-100 flex-shrink-0">
         <div className="flex items-end gap-2">
-          {recordingSupported && (
-            <button
-              onClick={handleVoiceInput}
-              className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-100 text-amber-700'
-              }`}
-              title={isRecording ? '停止录音' : '语音输入'}
-            >
-              🎤
-            </button>
-          )}
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isRecording ? '正在听你说话...' : '输入问题，按 Enter 发送'}
+            placeholder="输入问题，按 Enter 发送"
             rows={1}
             className="flex-1 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 placeholder-amber-300 resize-none"
             style={{ minHeight: '40px', maxHeight: '120px' }}
-            disabled={isRecording}
           />
-          {isStreaming ? (
+          {isStreaming && streamingConvIdRef.current === activeId ? (
             <button
               onClick={handleStop}
               className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center flex-shrink-0"
@@ -398,9 +386,6 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
             </button>
           )}
         </div>
-        {isRecording && (
-          <p className="text-xs text-red-500 mt-1 text-center">🎙️ 正在录音，再次点击麦克风结束</p>
-        )}
       </div>
 
       {/* ============ 会话列表浮层 ============ */}
