@@ -12,16 +12,18 @@ import CalendarPage from './pages/Calendar';
 import FoodList from './pages/FoodList';
 import ProfilePage from './pages/Profile';
 import CategoryDetail from './pages/FoodList/CategoryDetail';
+import ChatPage from './pages/Chat';
 import TabBar, { type TabKey } from './components/TabBar';
 
 type Page =
   | { type: 'onboarding_create' }
   | { type: 'onboarding_foods' }
   | { type: 'tab'; tab: TabKey }
-  | { type: 'category_detail'; categoryId: string };
+  | { type: 'category_detail'; categoryId: string }
+  | { type: 'chat' };
 
 // Hash 路由工具函数
-function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'category_detail'; categoryId: string } | null {
+function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'category_detail'; categoryId: string } | { type: 'chat' } | null {
   const cleanHash = hash.replace('#', '');
   
   if (!cleanHash) return null;
@@ -34,12 +36,17 @@ function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'catego
     return { type: 'category_detail', categoryId: cleanHash.replace('category-', '') };
   }
   
+  if (cleanHash === 'chat') {
+    return { type: 'chat' };
+  }
+  
   return null;
 }
 
 function pageToHash(page: Page): string {
   if (page.type === 'tab') return `#${page.tab}`;
   if (page.type === 'category_detail') return `#category-${page.categoryId}`;
+  if (page.type === 'chat') return '#chat';
   return '#home';
 }
 
@@ -137,6 +144,10 @@ function App() {
     window.location.hash = '';
   }, []);
 
+  const handleOpenChat = useCallback(() => {
+    setPage({ type: 'chat' });
+  }, []);
+
   // ============ 路由渲染 ============
 
   // 引导页：创建宝宝
@@ -164,6 +175,15 @@ function App() {
     );
   }
 
+  // AI 助手页
+  if (page.type === 'chat') {
+    return (
+      <ChatPage
+        onBack={() => setPage({ type: 'tab', tab: 'home' })}
+      />
+    );
+  }
+
   // 主页面（Tab）
   if (page.type === 'tab' && profile) {
     const activeTab = page.tab;
@@ -184,7 +204,7 @@ function App() {
             onClearData={handleClearData}
           />
         )}
-        <TabBar active={activeTab} onChange={handleTabChange} />
+        <TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />
       </div>
     );
   }
