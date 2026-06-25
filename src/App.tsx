@@ -1,5 +1,5 @@
 // ============================
-// 主应用入口（路由管理 + 返回键导航）
+// 主应用入口（Hash 路由 + 微信兼容返回键）
 // ============================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -20,65 +20,91 @@ type Page =
   | { type: 'tab'; tab: TabKey }
   | { type: 'category_detail'; categoryId: string };
 
+// Hash 路由工具函数
+function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'category_detail'; categoryId: string } | null {
+  const cleanHash = hash.replace('#', '');
+  
+  if (!cleanHash) return null;
+  
+  if (['home', 'calendar', 'food', 'profile'].includes(cleanHash)) {
+    return { type: 'tab', tab: cleanHash as TabKey };
+  }
+  
+  if (cleanHash.startsWith('category-')) {
+    return { type: 'category_detail', categoryId: cleanHash.replace('category-', '') };
+  }
+  
+  return null;
+}
+
+function pageToHash(page: Page): string {
+  if (page.type === 'tab') return `#${page.tab}`;
+  if (page.type === 'category_detail') return `#category-${page.categoryId}`;
+  return '#home';
+}
+
 function App() {
   const [profile, setProfile] = useState<BabyProfile | null>(null);
   const [page, setPage] = useState<Page>({ type: 'onboarding_create' });
-  // 记录最近一次由 popstate 恢复的状态，避免 useEffect 重复 push
-  const lastPopStatePage = useRef<string | null>(null);
+  const currentPageRef = useRef<Page>(page);
 
-  // 初始化：检查是否已有宝宝数据
+  // 同步 ref
+  useEffect(() => {
+    currentPageRef.current = page;
+  }, [page]);
+
+  // ============ 初始化 ============
   useEffect(() => {
     const existing = getProfile();
     if (existing) {
       setProfile(existing);
-      setPage({ type: 'tab', tab: 'home' });
+      // 检查 URL hash，如果有则使用，否则设置默认
+      const hashPage = parseHash(window.location.hash);
+      if (hashPage) {
+        setPage(hashPage);
+      } else {
+        setPage({ type: 'tab', tab: 'home' });
+        window.location.hash = '#home';
+      }
     }
   }, []);
 
-  // ============ 浏览器历史导航 ============
-
-  // 监听浏览器返回键
+  // ============ Hash 路由监听 ============
   useEffect(() => {
-    const handler = (e: PopStateEvent) => {
-      const state = e.state as { tab?: TabKey; categoryId?: string } | null;
-      if (!state) return;
-
-      let newPage: Page;
-      if (state.categoryId) {
-        newPage = { type: 'category_detail', categoryId: state.categoryId };
-      } else {
-        newPage = { type: 'tab', tab: state.tab || 'home' };
+    const handler = () => {
+      const hash = window.location.hash;
+      
+      // 如果 hash 为空（用户按了返回键试图退出），重新设置当前页面的 hash
+      if (!hash || hash === '#') {
+        const current = currentPageRef.current;
+        if (current.type === 'tab' || current.type === 'category_detail') {
+          // 恢复 hash，阻止关闭页面
+          setTimeout(() => {
+            window.location.hash = pageToHash(current);
+          }, 10);
+        }
+        return;
       }
-
-      // 标记这次 page 变化来自 popstate，阻止 useEffect 再次 push
-      lastPopStatePage.current = JSON.stringify(state);
-      setPage(newPage);
+      
+      // 解析新的 hash
+      const newPage = parseHash(hash);
+      if (newPage) {
+        setPage(newPage);
+      }
     };
 
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
+    window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
   }, []);
 
-  // 当 page 变化时，将导航状态推入浏览器历史
+  // ============ 页面变化时更新 hash ============
   useEffect(() => {
-    let stateObj: { tab?: TabKey; categoryId?: string } | null = null;
-
-    if (page.type === 'tab') {
-      stateObj = { tab: page.tab };
-    } else if (page.type === 'category_detail') {
-      stateObj = { categoryId: page.categoryId };
-    }
-
-    if (!stateObj) return;
-
-    const stateStr = JSON.stringify(stateObj);
-
-    // 如果是 popstate 恢复的状态，只 replace（不 push 重复条目）
-    if (lastPopStatePage.current === stateStr) {
-      lastPopStatePage.current = null;
-      window.history.replaceState(stateObj, '');
-    } else {
-      window.history.pushState(stateObj, '');
+    if (page.type === 'tab' || page.type === 'category_detail') {
+      const newHash = pageToHash(page);
+      // 只在 hash 不同时更新，避免循环
+      if (window.location.hash !== newHash) {
+        window.location.hash = newHash;
+      }
     }
   }, [page]);
 
@@ -108,6 +134,7 @@ function App() {
   const handleClearData = useCallback(() => {
     setProfile(null);
     setPage({ type: 'onboarding_create' });
+    window.location.hash = '';
   }, []);
 
   // ============ 路由渲染 ============
