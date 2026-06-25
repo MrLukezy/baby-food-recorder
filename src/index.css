@@ -8,4 +8,64 @@ body {
     "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #FFF8F0;
+  color: #4A3728;
+}
+
+/* 消除移动端点击延迟 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 安全区域适配（iPhone 刘海屏底部） */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 底部弹出面板动画 */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* 慢速弹跳动画 */
+@keyframes bounceSlow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounceSlow 2s ease-in-out infinite;
+}
+
+/* 输入框样式统一 */
+input[type="date"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #fdba74;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
 }
