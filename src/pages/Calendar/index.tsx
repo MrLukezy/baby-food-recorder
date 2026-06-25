@@ -178,10 +178,10 @@ const CalendarPage: React.FC = () => {
                   key={i}
                   onClick={() => setSelectedDate(cell.date)}
                   className={`relative flex flex-col items-center py-1 rounded-lg transition-all min-h-[44px] ${
-                    !cell.isCurrentMonth
-                      ? 'text-amber-200'
-                      : isSelected
-                        ? 'bg-orange-400 text-white shadow-md'
+                    isSelected
+                      ? 'bg-orange-400 text-white shadow-md'
+                      : !cell.isCurrentMonth
+                        ? 'text-amber-200'
                         : isToday
                           ? 'bg-orange-100 text-orange-700 font-bold'
                           : hasRetest

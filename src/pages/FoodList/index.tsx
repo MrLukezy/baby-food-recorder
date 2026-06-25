@@ -18,6 +18,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showPanel, setShowPanel] = useState(false);
   const [prefillFood, setPrefillFood] = useState<{ id: string; name: string } | null>(null);
+  const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [listTab, setListTab] = useState<'tested' | 'untested'>('tested');
 
   const forceRefresh = useCallback(() => setRefresh(n => n + 1), []);
@@ -243,7 +244,8 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
         visible={showPanel}
         defaultDate={today()}
         prefillFood={prefillFood}
-        onClose={() => { setShowPanel(false); setPrefillFood(null); }}
+        editRecordId={editRecordId}
+        onClose={() => { setShowPanel(false); setPrefillFood(null); setEditRecordId(null); }}
         onSaved={forceRefresh}
       />
     </div>

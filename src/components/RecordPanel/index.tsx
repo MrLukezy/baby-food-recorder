@@ -1,23 +1,24 @@
 // ============================
-// 辅食记录面板（底部弹出）
+// 辅食记录面板（底部弹出）- 支持新建/编辑/删除
 // ============================
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { FoodRecord, MealType, ReactionType, DayCount } from '../../types';
+import type { MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods } from '../../config/foodConfig';
-import { addRecord, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
+import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
   visible: boolean;
   defaultDate?: string;
   prefillFood?: { id: string; name: string } | null;
+  editRecordId?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }
 
-const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefillFood, onClose, onSaved }) => {
+const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefillFood, editRecordId, onClose, onSaved }) => {
   const [date, setDate] = useState(defaultDate || today());
   const [meal, setMeal] = useState<MealType>('lunch');
   const [foodQuery, setFoodQuery] = useState('');
@@ -30,32 +31,65 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   const [showSearch, setShowSearch] = useState(false);
   const [warningMsg, setWarningMsg] = useState('');
   const [reactionHint, setReactionHint] = useState('');
+  const [isEditMode, setIsEditMode] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
+  // 判断是否为编辑模式：加载已有记录
   useEffect(() => {
-    if (defaultDate) setDate(defaultDate);
-  }, [defaultDate]);
+    if (!visible) return;
 
-  // 预填食物（从食物列表点击跳转时）
-  useEffect(() => {
-    if (prefillFood && visible) {
+    if (editRecordId) {
+      const existing = getRecords().find(r => r.id === editRecordId);
+      if (existing) {
+        // 编辑模式：加载已有记录数据
+        setDate(existing.date);
+        setMeal(existing.meal);
+        setSelectedFoodId(existing.foodId);
+        setSelectedFoodName(existing.foodName);
+        setFoodQuery(existing.foodName);
+        setReaction(existing.reaction);
+        setDayCount(existing.dayCount);
+        setNote(existing.note);
+        setIsEditMode(true);
+        return;
+      }
+    }
+
+    // 非编辑模式：检查同日期+同食物是否已有记录
+    if (prefillFood && defaultDate) {
+      const existingRecord = getRecords().find(
+        r => r.date === defaultDate && r.foodId === prefillFood.id
+      );
+      if (existingRecord) {
+        // 同食物同日期，自动切换为编辑模式
+        setDate(existingRecord.date);
+        setMeal(existingRecord.meal);
+        setSelectedFoodId(existingRecord.foodId);
+        setSelectedFoodName(existingRecord.foodName);
+        setFoodQuery(existingRecord.foodName);
+        setReaction(existingRecord.reaction);
+        setDayCount(existingRecord.dayCount);
+        setNote(existingRecord.note);
+        setIsEditMode(true);
+        return;
+      }
+    }
+
+    // 新建模式
+    setDate(defaultDate || today());
+    setMeal('lunch');
+    if (prefillFood) {
       setSelectedFoodId(prefillFood.id);
       setSelectedFoodName(prefillFood.name);
       setFoodQuery(prefillFood.name);
-
-      // 自动检测食物已有的排敏状态，设置合适的默认天数
       const status = getFoodAllergenStatus(prefillFood.id);
-      if (status === 'safe') {
-        setDayCount('day3');
-        setReaction('safe');
-      } else if (status === 'observing') {
-        // 根据已有记录天数设置
-        setReaction('observing');
-      } else if (status === 'suspected') {
-        setReaction('suspected');
-      }
+      if (status === 'safe') { setDayCount('day3'); setReaction('safe'); }
+      else if (status === 'observing') { setReaction('observing'); }
+      else if (status === 'suspected') { setReaction('suspected'); }
+      else { setReaction('safe'); setDayCount('day1'); }
     }
-  }, [prefillFood, visible]);
+    setIsEditMode(false);
+  }, [visible, editRecordId, prefillFood, defaultDate]);
 
   useEffect(() => {
     if (foodQuery.trim().length > 0) {
@@ -73,15 +107,13 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setReactionHint('');
     if (!selectedFoodId) return;
 
-    const allFoods = getAllFoods();
-    const foodInfo = allFoods.find(f => f.id === selectedFoodId);
+    const allFoodsList = getAllFoods();
+    const foodInfo = allFoodsList.find(f => f.id === selectedFoodId);
 
-    // 高敏食物额外提醒
     if (foodInfo?.allergenLevel === 'high') {
       setWarningMsg(`⚠️ ${selectedFoodName} 属于高敏食物，建议格外注意观察宝宝反应`);
     }
 
-    // 如果有疑似过敏记录，显示回避触发实验日期
     const retestDate = getSuspectedRetestDate(selectedFoodId);
     if (retestDate) {
       const todayDate = today();
@@ -128,6 +160,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setShowSearch(false);
     setWarningMsg('');
     setReactionHint('');
+    setIsEditMode(false);
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -135,7 +168,25 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setSelectedFoodName(food.name);
     setFoodQuery(food.name);
     setShowSearch(false);
+
+    // 切换食物时检查是否同日期已有该食物记录
+    if (!editRecordId) {
+      const currentDate = date || defaultDate || today();
+      const existingRecord = getRecords().find(
+        r => r.date === currentDate && r.foodId === food.id
+      );
+      if (existingRecord) {
+        // 自动切换为编辑模式
+        setMeal(existingRecord.meal);
+        setReaction(existingRecord.reaction);
+        setDayCount(existingRecord.dayCount);
+        setNote(existingRecord.note);
+        setIsEditMode(true);
+      }
+    }
   };
+
+  // ============ 保存 ============
 
   const handleSave = () => {
     if (!selectedFoodName.trim()) {
@@ -143,35 +194,86 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       return;
     }
 
-    // 同时排敏检测
-    const observingFoods = getObservingFoods();
-    const isAlreadyObservingThis = observingFoods.some(f => f.foodId === selectedFoodId);
+    // 同时排敏检测（仅新建时）
+    if (!isEditMode) {
+      const observingFoods = getObservingFoods();
+      const isAlreadyObservingThis = observingFoods.some(f => f.foodId === selectedFoodId);
 
-    if (!isAlreadyObservingThis && observingFoods.length > 0 && reaction !== 'suspected' && reaction !== 'allergic') {
-      const names = observingFoods.map(f => f.foodName).join('、');
-      const confirmed = window.confirm(
-        `💡 排敏提醒\n\n` +
-        `当前已有食物正在排敏中：\n${names}\n\n` +
-        `不建议同时排敏两种食物，这样无法判断过敏源。\n` +
-        `建议等当前食物排敏完成（连续3天）后再引入新食物。\n\n` +
-        `确定要继续添加吗？`
-      );
-      if (!confirmed) return;
+      if (!isAlreadyObservingThis && observingFoods.length > 0 && reaction !== 'suspected' && reaction !== 'allergic') {
+        const names = observingFoods.map(f => f.foodName).join('、');
+        const confirmed = window.confirm(
+          `💡 排敏提醒\n\n` +
+          `当前已有食物正在排敏中：\n${names}\n\n` +
+          `不建议同时排敏两种食物，这样无法判断过敏源。\n` +
+          `建议等当前食物排敏完成（连续3天）后再引入新食物。\n\n` +
+          `确定要继续添加吗？`
+        );
+        if (!confirmed) return;
+      }
     }
 
-    const record: FoodRecord = {
-      id: generateId(),
-      date,
-      meal,
-      foodId: selectedFoodId || 'custom_' + Date.now(),
-      foodName: selectedFoodName.trim(),
-      reaction,
-      dayCount,
-      note: note.trim(),
-      createdAt: new Date().toISOString(),
-    };
+    const foodId = selectedFoodId || 'custom_' + Date.now();
 
-    addRecord(record);
+    // 编辑模式：更新已有记录
+    if (editRecordId) {
+      updateRecord(editRecordId, {
+        date,
+        meal,
+        foodId,
+        foodName: selectedFoodName.trim(),
+        reaction,
+        dayCount,
+        note: note.trim(),
+      });
+      resetForm();
+      onSaved();
+      onClose();
+      return;
+    }
+
+    // 新建模式：检查是否已有同日期+同食物的记录，如存在则更新（去重）
+    const existingRecord = getRecords().find(
+      r => r.date === date && r.foodId === foodId
+    );
+
+    if (existingRecord) {
+      // 更新已有记录
+      updateRecord(existingRecord.id, {
+        meal,
+        foodName: selectedFoodName.trim(),
+        reaction,
+        dayCount,
+        note: note.trim(),
+      });
+    } else {
+      // 新增记录
+      addRecord({
+        id: generateId(),
+        date,
+        meal,
+        foodId,
+        foodName: selectedFoodName.trim(),
+        reaction,
+        dayCount,
+        note: note.trim(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    resetForm();
+    onSaved();
+    onClose();
+  };
+
+  // ============ 删除 ============
+
+  const handleDelete = () => {
+    if (!editRecordId) return;
+
+    const confirmed = window.confirm('确定要删除这条记录吗？');
+    if (!confirmed) return;
+
+    deleteRecord(editRecordId);
     resetForm();
     onSaved();
     onClose();
@@ -198,12 +300,22 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
         {/* 标题 */}
         <div className="flex items-center justify-between px-5 pb-3 flex-shrink-0">
-          <h2 className="text-lg font-bold text-amber-900">记录新食材</h2>
+          <h2 className="text-lg font-bold text-amber-900">
+            {isEditMode ? '编辑食材记录' : '记录新食材'}
+          </h2>
           <button onClick={handleCancel} className="text-gray-400 text-2xl">✕</button>
         </div>
 
         {/* 可滚动内容 */}
         <div className="flex-1 overflow-y-auto px-5 pb-4">
+          {/* 编辑模式提示 */}
+          {isEditMode && (
+            <div className="mb-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-sm flex-shrink-0">✏️</span>
+              <p className="text-xs text-blue-700">正在编辑已有记录，同一日期+同一食物只保留一条记录</p>
+            </div>
+          )}
+
           {/* 警告信息 */}
           {warningMsg && (
             <div className="mb-3 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 flex items-start gap-2">
@@ -212,7 +324,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
             </div>
           )}
 
-          {/* 反应提示（回避触发实验等） */}
+          {/* 反应提示 */}
           {reactionHint && (
             <div className="mb-3 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
               <p className="text-xs text-orange-700 leading-relaxed whitespace-pre-line">{reactionHint}</p>
@@ -261,6 +373,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
                 if (e.target.value !== selectedFoodName) {
                   setSelectedFoodId('');
                   setSelectedFoodName('');
+                  setIsEditMode(false);
                 }
               }}
               placeholder="搜索或输入食物名称..."
@@ -350,20 +463,45 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
         {/* 按钮组 - 固定底部 */}
         <div className="flex-shrink-0 px-5 pb-5 pt-3 border-t border-amber-100 bg-white">
-          <div className="flex gap-3">
-            <button
-              onClick={handleCancel}
-              className="flex-1 py-3 rounded-xl text-amber-600 bg-amber-50 border border-amber-200 font-medium"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex-1 py-3 rounded-xl text-white bg-orange-400 font-medium active:bg-orange-500"
-            >
-              保存
-            </button>
-          </div>
+          {isEditMode ? (
+            /* 编辑模式：取消 + 删除 + 保存 */
+            <div className="flex gap-2">
+              <button
+                onClick={handleCancel}
+                className="flex-1 py-3 rounded-xl text-amber-600 bg-amber-50 border border-amber-200 font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDelete}
+                className="py-3 px-4 rounded-xl text-red-500 bg-red-50 border border-red-200 font-medium"
+              >
+                删除
+              </button>
+              <button
+                onClick={handleSave}
+                className="flex-1 py-3 rounded-xl text-white bg-orange-400 font-medium active:bg-orange-500"
+              >
+                保存修改
+              </button>
+            </div>
+          ) : (
+            /* 新建模式：取消 + 保存 */
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancel}
+                className="flex-1 py-3 rounded-xl text-amber-600 bg-amber-50 border border-amber-200 font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSave}
+                className="flex-1 py-3 rounded-xl text-white bg-orange-400 font-medium active:bg-orange-500"
+              >
+                保存
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -34,6 +34,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   const [stats, setStats] = useState({ total: 0, safe: 0, observing: 0, suspected: 0, allergic: 0 });
   const [showPanel, setShowPanel] = useState(false);
   const [prefillFood, setPrefillFood] = useState<{ id: string; name: string } | null>(null);
+  const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [statFilter, setStatFilter] = useState<string | null>(null);
   const [showAllRecords, setShowAllRecords] = useState(false);
 
@@ -147,9 +148,10 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
     }
   };
 
-  // 从记录中点击食物时，预填食物
-  const handleAddRecord = (food?: { id: string; name: string }) => {
-    setPrefillFood(food ?? null);
+  // 从记录中点击食物时，预填食物并进入编辑模式
+  const handleAddRecord = (food?: { id: string; name: string; recordId?: string }) => {
+    setPrefillFood(food ? { id: food.id, name: food.name } : null);
+    setEditRecordId(food?.recordId ?? null);
     setShowPanel(true);
   };
 
@@ -344,7 +346,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
                         return (
                           <button
                             key={rec.id}
-                            onClick={() => handleAddRecord({ id: rec.foodId, name: rec.foodName })}
+                            onClick={() => handleAddRecord({ id: rec.foodId, name: rec.foodName, recordId: rec.id })}
                             className="w-full flex items-center gap-2 bg-amber-50 rounded-lg px-3 py-2 hover:bg-amber-100 transition-colors"
                           >
                             <span className="text-base">{getFoodEmoji(rec.foodId)}</span>
@@ -428,7 +430,8 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
         visible={showPanel}
         defaultDate={selectedDate}
         prefillFood={prefillFood}
-        onClose={() => { setShowPanel(false); setPrefillFood(null); }}
+        editRecordId={editRecordId}
+        onClose={() => { setShowPanel(false); setPrefillFood(null); setEditRecordId(null); }}
         onSaved={refreshData}
       />
 
