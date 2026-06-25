@@ -16,7 +16,7 @@ export interface BabyProfile {
 export type MealType = 'breakfast' | 'lunch' | 'snack' | 'dinner';
 
 /** 排敏反应 */
-export type ReactionType = 'safe' | 'observing' | 'allergic';
+export type ReactionType = 'safe' | 'observing' | 'suspected' | 'allergic';
 
 /** 排敏天数 */
 export type DayCount = 'day1' | 'day2' | 'day3';
@@ -32,6 +32,10 @@ export interface FoodRecord {
   dayCount: DayCount;
   note: string;
   createdAt: string;
+  // 疑似过敏相关字段
+  suspectedAt?: string; // 首次标记疑似过敏的日期
+  retestDate?: string; // 回避触发实验建议日期
+  retestResult?: 'confirmed_allergic' | 'confirmed_safe' | 'pending'; // 回避实验结果
 }
 
 /** 食物项 */
@@ -63,6 +67,7 @@ export const MEAL_OPTIONS: { value: MealType; label: string }[] = [
 export const REACTION_OPTIONS: { value: ReactionType; label: string; color: string }[] = [
   { value: 'safe', label: '不过敏', color: '#7BC67E' },
   { value: 'observing', label: '观察中', color: '#FFB347' },
+  { value: 'suspected', label: '疑似过敏', color: '#F59E0B' },
   { value: 'allergic', label: '过敏', color: '#FF6B6B' },
 ];
 

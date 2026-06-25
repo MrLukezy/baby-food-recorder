@@ -72,7 +72,8 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
         allRecs.filter(r => r.foodId === foodId).map(r => r.date)
       ).size;
       item.status = status;
-      item.days = days;
+      // 预设食物（无记录）显示为 3 天（排敏完成）
+      item.days = presets.includes(foodId) && days === 0 ? 3 : days;
     }
 
     return { foods: Array.from(foodMap.values()), total: foodMap.size };
@@ -251,6 +252,10 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
               <span className="text-lg font-bold text-yellow-500">{stats.observing}</span>
             </div>
             <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <span className="text-sm text-amber-700">疑似过敏</span>
+              <span className="text-lg font-bold text-amber-500">{stats.suspected}</span>
+            </div>
+            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
               <span className="text-sm text-amber-700">过敏源</span>
               <span className="text-lg font-bold text-red-500">{stats.allergic}</span>
             </div>
@@ -310,11 +315,13 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
               {(() => {
                 const grouped = {
                   safe: allRecordsData.foods.filter(f => f.status === 'safe'),
+                  suspected: allRecordsData.foods.filter(f => f.status === 'suspected'),
                   observing: allRecordsData.foods.filter(f => f.status === 'observing'),
                   allergic: allRecordsData.foods.filter(f => f.status === 'allergic'),
                 };
                 const sections = [
                   { key: 'safe', label: '排敏完成（不过敏）', foods: grouped.safe, color: '#7BC67E' },
+                  { key: 'suspected', label: '疑似过敏（待回避触发实验）', foods: grouped.suspected, color: '#F59E0B' },
                   { key: 'observing', label: '排敏中', foods: grouped.observing, color: '#FFB347' },
                   { key: 'allergic', label: '过敏', foods: grouped.allergic, color: '#FF6B6B' },
                 ];

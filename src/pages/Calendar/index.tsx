@@ -1,11 +1,11 @@
 // ============================
-// 日历 Tab
+// 日历 Tab（含回避触发实验提醒）
 // ============================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { FoodRecord } from '../../types';
 import { REACTION_OPTIONS, MEAL_OPTIONS } from '../../types';
-import { getRecords } from '../../store';
+import { getRecords, getRetestReminders } from '../../store';
 import { getFoodEmoji } from '../../config/foodConfig';
 import { today, getMonthCalendar, formatFriendlyDate, getMonthLabel } from '../../utils/date';
 
@@ -22,6 +22,18 @@ const CalendarPage: React.FC = () => {
 
   useEffect(refreshData, [refreshData]);
 
+  // 回避触发实验提醒
+  const retestReminders = useMemo(() => getRetestReminders(), [allRecords]);
+
+  // 将所有提醒的日期收集成一个 set，用于在日历上标注
+  const retestDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const rem of retestReminders) {
+      dates.add(rem.retestDate);
+    }
+    return dates;
+  }, [retestReminders]);
+
   const calendarCells = getMonthCalendar(year, month);
   const todayStr = today();
 
@@ -32,6 +44,7 @@ const CalendarPage: React.FC = () => {
     total: monthRecords.length,
     safe: new Set(monthRecords.filter(r => r.reaction === 'safe').map(r => r.date)).size,
     observing: new Set(monthRecords.filter(r => r.reaction === 'observing').map(r => r.date)).size,
+    suspected: new Set(monthRecords.filter(r => r.reaction === 'suspected').map(r => r.date)).size,
     allergic: new Set(monthRecords.filter(r => r.reaction === 'allergic').map(r => r.date)).size,
   };
 
@@ -42,6 +55,9 @@ const CalendarPage: React.FC = () => {
       const mealOrder = ['breakfast', 'lunch', 'snack', 'dinner'];
       return mealOrder.indexOf(a.meal) - mealOrder.indexOf(b.meal);
     });
+
+  // 选中日期的回避触发实验提醒
+  const dayReminders = retestReminders.filter(r => r.retestDate === selectedDate);
 
   const prevMonth = () => {
     if (month === 0) { setYear(y => y - 1); setMonth(11); }
@@ -79,13 +95,52 @@ const CalendarPage: React.FC = () => {
       <div className="px-4 space-y-4">
         {/* 月份统计 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <div className="flex justify-between text-sm">
-            <span className="text-amber-700">总 <b className="text-orange-500">{monthStats.total}</b>次</span>
-            <span className="text-green-600">安全 <b>{monthStats.safe}</b></span>
-            <span className="text-yellow-600">观察 <b>{monthStats.observing}</b></span>
-            <span className="text-red-600">过敏 <b>{monthStats.allergic}</b></span>
+          <div className="grid grid-cols-5 gap-2 text-sm">
+            <span className="text-amber-700 text-center">总 <b className="text-orange-500">{monthStats.total}</b>次</span>
+            <span className="text-green-600 text-center">安全 <b>{monthStats.safe}</b></span>
+            <span className="text-yellow-600 text-center">观察 <b>{monthStats.observing}</b></span>
+            <span className="text-amber-600 text-center">疑似 <b>{monthStats.suspected}</b></span>
+            <span className="text-red-600 text-center">过敏 <b>{monthStats.allergic}</b></span>
           </div>
         </div>
+
+        {/* 回避触发实验提醒（当前月份内的） */}
+        {retestReminders.length > 0 && (
+          <div className="bg-amber-100 border border-amber-200 rounded-2xl p-3 shadow-sm">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-base">🔔</span>
+              <span className="text-xs font-bold text-amber-900">回避触发实验日历</span>
+            </div>
+            <div className="space-y-1.5">
+              {retestReminders.map((rem, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    // 跳转到该提醒所在月份
+                    const [y, m] = rem.retestDate.split('-').map(Number);
+                    setYear(y);
+                    setMonth(m - 1);
+                    setSelectedDate(rem.retestDate);
+                  }}
+                  className="w-full flex items-center justify-between bg-white rounded-xl px-3 py-2 hover:bg-amber-50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">{getFoodEmoji(rem.foodId)}</span>
+                    <span className="text-sm font-medium text-amber-900">{rem.foodName}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-xs font-medium ${rem.isOverdue ? 'text-orange-600' : 'text-amber-700'}`}>
+                      {rem.retestDate}
+                    </span>
+                    <span className="text-xs text-amber-500 ml-1">
+                      {rem.isOverdue ? `(${Math.abs(rem.daysUntilRetest)}天超时)` : `(${rem.daysUntilRetest}天后)`}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 日历网格 */}
         <div className="bg-white rounded-2xl p-3 shadow-sm">
@@ -104,15 +159,19 @@ const CalendarPage: React.FC = () => {
               const dayRecords = allRecords.filter(r => r.date === cell.date);
               const hasRecord = dayRecords.length > 0;
               const hasAllergic = dayRecords.some(r => r.reaction === 'allergic');
+              const hasSuspected = dayRecords.some(r => r.reaction === 'suspected');
               const hasObserving = dayRecords.some(r => r.reaction === 'observing');
+              const hasRetest = retestDates.has(cell.date);
               const isSelected = cell.date === selectedDate;
               const isToday = cell.date === todayStr;
               const dayNum = Number(cell.date.split('-')[2]);
 
               let dotColor = '';
               if (hasAllergic) dotColor = 'bg-red-400';
+              else if (hasSuspected) dotColor = 'bg-amber-400';
               else if (hasObserving) dotColor = 'bg-yellow-400';
               else if (hasRecord) dotColor = 'bg-green-400';
+              else if (hasRetest) dotColor = 'bg-orange-400';
 
               return (
                 <button
@@ -125,16 +184,39 @@ const CalendarPage: React.FC = () => {
                         ? 'bg-orange-400 text-white shadow-md'
                         : isToday
                           ? 'bg-orange-100 text-orange-700 font-bold'
-                          : 'text-amber-800 hover:bg-amber-50'
+                          : hasRetest
+                            ? 'bg-orange-50 text-orange-700 font-medium'
+                            : 'text-amber-800 hover:bg-amber-50'
                   }`}
                 >
                   <span className="text-sm">{dayNum}</span>
+                  {hasRetest && !hasRecord && (
+                    <span className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-orange-400'}`} />
+                  )}
                   {dotColor && (
                     <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : dotColor}`} />
                   )}
                 </button>
               );
             })}
+          </div>
+          {/* 图例 */}
+          <div className="flex items-center gap-3 justify-center mt-2 pt-2 border-t border-amber-50">
+            <span className="text-xs text-amber-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400" />记录
+            </span>
+            <span className="text-xs text-amber-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />观察中
+            </span>
+            <span className="text-xs text-amber-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />疑似过敏
+            </span>
+            <span className="text-xs text-amber-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400" />过敏
+            </span>
+            <span className="text-xs text-amber-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />实验日
+            </span>
           </div>
         </div>
 
@@ -143,6 +225,27 @@ const CalendarPage: React.FC = () => {
           <h3 className="text-sm font-bold text-amber-800 mb-3">
             {formatFriendlyDate(selectedDate)}的辅食记录
           </h3>
+
+          {/* 选中日期的回避触发实验提醒 */}
+          {dayReminders.length > 0 && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="text-base">🔔</span>
+                <span className="text-sm font-bold text-amber-900">今天是回避触发实验日</span>
+              </div>
+              {dayReminders.map((rem, i) => (
+                <div key={i} className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 mt-1.5">
+                  <span className="text-base">{getFoodEmoji(rem.foodId)}</span>
+                  <div>
+                    <span className="text-sm font-medium text-amber-900">{rem.foodName}</span>
+                    <p className="text-xs text-amber-600 mt-0.5">
+                      从极少量（1/8 勺）开始，观察 2-4 小时
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {dayRecords.length === 0 ? (
             <div className="text-center py-8 text-amber-400">

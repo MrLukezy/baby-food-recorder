@@ -6,17 +6,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { FoodRecord, MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods } from '../../config/foodConfig';
-import { addRecord, generateId, getObservingFoods } from '../../store';
+import { addRecord, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
   visible: boolean;
   defaultDate?: string;
+  prefillFood?: { id: string; name: string } | null;
   onClose: () => void;
   onSaved: () => void;
 }
 
-const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose, onSaved }) => {
+const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefillFood, onClose, onSaved }) => {
   const [date, setDate] = useState(defaultDate || today());
   const [meal, setMeal] = useState<MealType>('lunch');
   const [foodQuery, setFoodQuery] = useState('');
@@ -28,11 +29,33 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
   const [searchResults, setSearchResults] = useState<ReturnType<typeof searchFoods>>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [warningMsg, setWarningMsg] = useState('');
+  const [reactionHint, setReactionHint] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
   }, [defaultDate]);
+
+  // 预填食物（从食物列表点击跳转时）
+  useEffect(() => {
+    if (prefillFood && visible) {
+      setSelectedFoodId(prefillFood.id);
+      setSelectedFoodName(prefillFood.name);
+      setFoodQuery(prefillFood.name);
+
+      // 自动检测食物已有的排敏状态，设置合适的默认天数
+      const status = getFoodAllergenStatus(prefillFood.id);
+      if (status === 'safe') {
+        setDayCount('day3');
+        setReaction('safe');
+      } else if (status === 'observing') {
+        // 根据已有记录天数设置
+        setReaction('observing');
+      } else if (status === 'suspected') {
+        setReaction('suspected');
+      }
+    }
+  }, [prefillFood, visible]);
 
   useEffect(() => {
     if (foodQuery.trim().length > 0) {
@@ -47,6 +70,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
   // 食物选中时自动检测排敏状态
   useEffect(() => {
     setWarningMsg('');
+    setReactionHint('');
     if (!selectedFoodId) return;
 
     const allFoods = getAllFoods();
@@ -56,7 +80,30 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
     if (foodInfo?.allergenLevel === 'high') {
       setWarningMsg(`⚠️ ${selectedFoodName} 属于高敏食物，建议格外注意观察宝宝反应`);
     }
+
+    // 如果有疑似过敏记录，显示回避触发实验日期
+    const retestDate = getSuspectedRetestDate(selectedFoodId);
+    if (retestDate) {
+      const todayDate = today();
+      const isOverdue = retestDate <= todayDate;
+      if (isOverdue) {
+        setReactionHint(`🔔 ${selectedFoodName} 可以进行回避触发实验了！从极少量开始添加。`);
+      } else {
+        setReactionHint(`⏰ ${selectedFoodName} 疑似过敏，建议 ${retestDate} 后进行回避触发实验`);
+      }
+    }
   }, [selectedFoodId, selectedFoodName]);
+
+  // 选择疑似过敏反应时显示说明
+  useEffect(() => {
+    if (reaction === 'suspected') {
+      setReactionHint(
+        '💡 "疑似过敏"表示宝宝可能出现了轻微过敏症状（如轻微皮疹、轻微腹泻等），' +
+        '但不确定是否是该食物导致。\n' +
+        '建议：回避该食物 2 周，然后从极少量开始做回避触发实验。'
+      );
+    }
+  }, [reaction]);
 
   // 点击外部关闭搜索
   useEffect(() => {
@@ -80,6 +127,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
     setNote('');
     setShowSearch(false);
     setWarningMsg('');
+    setReactionHint('');
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -95,11 +143,11 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
       return;
     }
 
-    // ============ 同时排敏检测 ============
+    // 同时排敏检测
     const observingFoods = getObservingFoods();
     const isAlreadyObservingThis = observingFoods.some(f => f.foodId === selectedFoodId);
 
-    if (!isAlreadyObservingThis && observingFoods.length > 0) {
+    if (!isAlreadyObservingThis && observingFoods.length > 0 && reaction !== 'suspected' && reaction !== 'allergic') {
       const names = observingFoods.map(f => f.foodName).join('、');
       const confirmed = window.confirm(
         `💡 排敏提醒\n\n` +
@@ -161,6 +209,13 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
             <div className="mb-3 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 flex items-start gap-2">
               <span className="text-sm flex-shrink-0">⚠️</span>
               <p className="text-xs text-yellow-700 leading-relaxed">{warningMsg}</p>
+            </div>
+          )}
+
+          {/* 反应提示（回避触发实验等） */}
+          {reactionHint && (
+            <div className="mb-3 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
+              <p className="text-xs text-orange-700 leading-relaxed whitespace-pre-line">{reactionHint}</p>
             </div>
           )}
 
@@ -235,12 +290,12 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
           {/* 排敏反应 */}
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">排敏反应</label>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {REACTION_OPTIONS.map(opt => (
                 <button
                   key={opt.value}
                   onClick={() => setReaction(opt.value)}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors border ${
+                  className={`py-2.5 rounded-xl text-sm font-medium transition-colors border ${
                     reaction === opt.value
                       ? 'text-white border-transparent'
                       : 'bg-white text-amber-700 border-amber-200'
@@ -251,9 +306,15 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
                 </button>
               ))}
             </div>
+            <p className="text-xs text-amber-400 mt-2">
+              {reaction === 'suspected' && '可能出现轻微过敏症状，建议回避 2 周后做回避触发实验'}
+              {reaction === 'allergic' && '确认过敏，建议回避 1-2 个月再从微量开始重试'}
+              {reaction === 'observing' && '正常排敏观察中，注意观察 2-4 小时'}
+              {reaction === 'safe' && '无明显不良反应，继续观察'}
+            </p>
           </div>
 
-          {/* 排敏天数说明 + 选择 */}
+          {/* 排敏天数 */}
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">排敏天数</label>
             <p className="text-xs text-amber-400 mb-2">连续 3 天无不良反应即为排敏完成</p>

@@ -92,9 +92,10 @@ export function savePresetAllergens(foodIds: string[]): void {
  *
  * 规则：
  * - 有任何 allergic 反应 → 'allergic'（过敏）
- * - 连续记录了 3 个不同日期 且无过敏 → 'safe'（排敏完成/不过敏）
- * - 不足 3 天 且无过敏 → 'observing'（排敏中）
- * - 预设食物（无记录）→ 'safe'（默认安全）
+ * - 有 suspected 反应，且无 allergic → 'suspected'（疑似过敏）
+ * - 连续记录了 3 个不同日期 且无过敏/疑似 → 'safe'（排敏完成/不过敏）
+ * - 不足 3 天 且无过敏/疑似 → 'observing'（排敏中）
+ * - 预设食物（无记录）→ 'safe'（默认安全，视为已完成3天排敏）
  * - 无任何数据 → null
  */
 export function getFoodAllergenStatus(foodId: string): ReactionType | null {
@@ -109,6 +110,10 @@ export function getFoodAllergenStatus(foodId: string): ReactionType | null {
   // 有任何一次过敏反应 → 整体判定过敏
   const hasAllergic = records.some(r => r.reaction === 'allergic');
   if (hasAllergic) return 'allergic';
+
+  // 有疑似过敏反应，但无确认过敏 → 'suspected'
+  const hasSuspected = records.some(r => r.reaction === 'suspected');
+  if (hasSuspected) return 'suspected';
 
   // 统计不同日期数（去重）
   const uniqueDays = new Set(records.map(r => r.date)).size;
@@ -137,10 +142,11 @@ export function getObservingFoods(): { foodId: string; foodName: string; dayCoun
 
   for (const [foodId, data] of foodMap) {
     const hasAllergic = records.some(r => r.foodId === foodId && r.reaction === 'allergic');
+    const hasSuspected = records.some(r => r.foodId === foodId && r.reaction === 'suspected');
     const dayCount = data.dates.size;
 
-    // 正在排敏：不足3天 且 无过敏反应
-    if (!hasAllergic && dayCount < 3) {
+    // 正在排敏：不足3天 且 无过敏/疑似过敏反应
+    if (!hasAllergic && !hasSuspected && dayCount < 3) {
       observing.push({ foodId, foodName: data.name, dayCount });
     }
   }
@@ -148,9 +154,91 @@ export function getObservingFoods(): { foodId: string; foodName: string; dayCoun
   return observing;
 }
 
+// ============ 疑似过敏回避触发实验 ============
+
+/**
+ * 获取某个食物的疑似过敏回避实验建议日期
+ * 规则：从首次标记为疑似过敏之日起，建议回避 2 周（14天），然后进行回避触发实验
+ */
+export function getSuspectedRetestDate(foodId: string): string | null {
+  const records = getRecords()
+    .filter(r => r.foodId === foodId && r.reaction === 'suspected')
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (records.length === 0) return null;
+
+  const firstSuspectedDate = records[0].date;
+  const retestDate = new Date(firstSuspectedDate);
+  retestDate.setDate(retestDate.getDate() + 14);
+
+  return retestDate.toISOString().split('T')[0];
+}
+
+/**
+ * 获取所有需要回避触发实验的食物列表
+ * 返回：食物ID、食物名、首次疑似过敏日期、建议实验日期、是否已过期
+ */
+export function getRetestReminders(): {
+  foodId: string;
+  foodName: string;
+  suspectedDate: string;
+  retestDate: string;
+  isOverdue: boolean;
+  daysUntilRetest: number;
+}[] {
+  const records = getRecords();
+  const today = new Date().toISOString().split('T')[0];
+
+  // 找出所有有疑似过敏记录的食物
+  const suspectedFoods = new Map<string, { dates: string[]; name: string }>();
+  for (const r of records) {
+    if (r.reaction === 'suspected') {
+      if (!suspectedFoods.has(r.foodId)) {
+        suspectedFoods.set(r.foodId, { dates: [], name: r.foodName });
+      }
+      suspectedFoods.get(r.foodId)!.dates.push(r.date);
+    }
+  }
+
+  const reminders: {
+    foodId: string;
+    foodName: string;
+    suspectedDate: string;
+    retestDate: string;
+    isOverdue: boolean;
+    daysUntilRetest: number;
+  }[] = [];
+
+  for (const [foodId, data] of suspectedFoods) {
+    // 检查是否已有确认结果（过敏或安全）
+    const latestStatus = getFoodAllergenStatus(foodId);
+    if (latestStatus === 'allergic' || latestStatus === 'safe') continue;
+
+    const firstSuspectedDate = data.dates.sort()[0];
+    const retestDateObj = new Date(firstSuspectedDate);
+    retestDateObj.setDate(retestDateObj.getDate() + 14);
+    const retestDateStr = retestDateObj.toISOString().split('T')[0];
+
+    const daysUntilRetest = Math.floor(
+      (retestDateObj.getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    reminders.push({
+      foodId,
+      foodName: data.name,
+      suspectedDate: firstSuspectedDate,
+      retestDate: retestDateStr,
+      isOverdue: daysUntilRetest < 0,
+      daysUntilRetest,
+    });
+  }
+
+  return reminders.sort((a, b) => a.retestDate.localeCompare(b.retestDate));
+}
+
 // ============ 统计 ============
 
-export function getStats(): { total: number; safe: number; observing: number; allergic: number } {
+export function getStats(): { total: number; safe: number; observing: number; suspected: number; allergic: number } {
   const records = getRecords();
   const presetIds = getPresetAllergens();
 
@@ -162,12 +250,14 @@ export function getStats(): { total: number; safe: number; observing: number; al
 
   let safe = 0;
   let observing = 0;
+  let suspected = 0;
   let allergic = 0;
 
   for (const foodId of foodIds) {
     const status = getFoodAllergenStatus(foodId);
     if (status === 'safe') safe++;
     else if (status === 'observing') observing++;
+    else if (status === 'suspected') suspected++;
     else if (status === 'allergic') allergic++;
   }
 
@@ -175,6 +265,7 @@ export function getStats(): { total: number; safe: number; observing: number; al
     total: records.length,
     safe,
     observing,
+    suspected,
     allergic,
   };
 }

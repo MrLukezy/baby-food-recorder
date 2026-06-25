@@ -25,7 +25,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
   }
 
   // 统计
-  let safeCount = 0, observingCount = 0, allergicCount = 0;
+  let safeCount = 0, observingCount = 0, suspectedCount = 0, allergicCount = 0;
   const foods = category.foods.map(food => {
     const reaction = getFoodAllergenStatus(food.id);
     const eatCount = getFoodEatCount(food.id);
@@ -34,6 +34,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
     ).size;
     if (reaction === 'safe') safeCount++;
     else if (reaction === 'observing') observingCount++;
+    else if (reaction === 'suspected') suspectedCount++;
     else if (reaction === 'allergic') allergicCount++;
     return { ...food, reaction, eatCount, daysTested };
   }).sort((a, b) => {
@@ -68,8 +69,9 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
           <div className="flex justify-between text-sm">
             <span className="text-green-600">完成 <b>{safeCount}</b>种</span>
             <span className="text-yellow-600">排敏中 <b>{observingCount}</b>种</span>
+            <span className="text-amber-600">疑似 <b>{suspectedCount}</b>种</span>
             <span className="text-red-600">过敏 <b>{allergicCount}</b>种</span>
-            <span className="text-amber-400">未排敏 <b>{foods.length - safeCount - observingCount - allergicCount}</b>种</span>
+            <span className="text-amber-400">未排敏 <b>{foods.length - safeCount - observingCount - suspectedCount - allergicCount}</b>种</span>
           </div>
         </div>
 
@@ -83,9 +85,11 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                 ? '已排敏 ✓'
                 : food.reaction === 'observing'
                   ? `排敏中 ${food.daysTested}/3`
-                  : food.reaction === 'allergic'
-                    ? '过敏 ✕'
-                    : '';
+                  : food.reaction === 'suspected'
+                    ? '疑似过敏 ?'
+                    : food.reaction === 'allergic'
+                      ? '过敏 ✕'
+                      : '';
 
               return (
                 <div

@@ -17,6 +17,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const [, setRefresh] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPanel, setShowPanel] = useState(false);
+  const [prefillFood, setPrefillFood] = useState<{ id: string; name: string } | null>(null);
   const [listTab, setListTab] = useState<'tested' | 'untested'>('tested');
 
   const forceRefresh = useCallback(() => setRefresh(n => n + 1), []);
@@ -48,19 +49,21 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const testedFoods = allFoods
     .filter(f => appearedFoodIds.has(f.id))
     .filter(f => !searchQuery || f.name.includes(searchQuery))
-    .map(f => ({
-      ...f,
-      eatCount: getFoodEatCount(f.id) + (presets.includes(f.id) ? 1 : 0),
-      allergenStatus: getFoodAllergenStatus(f.id),
-      daysTested: new Set(allRecords.filter(r => r.foodId === f.id).map(r => r.date)).size,
-    }))
-    .sort((a, b) => {
-      // 过敏的排后面，排敏中的靠前，完成的靠前
-      // 先按 eatCount 排序
-      return b.eatCount - a.eatCount;
-    });
+    .map(f => {
+      const recordDays = new Set(allRecords.filter(r => r.foodId === f.id).map(r => r.date)).size;
+      // 预设食物无记录时显示为 3 天（排敏完成）
+      const daysTested = recordDays > 0 ? recordDays : (presets.includes(f.id) ? 3 : 0);
+      return {
+        ...f,
+        eatCount: getFoodEatCount(f.id) + (presets.includes(f.id) ? 1 : 0),
+        allergenStatus: getFoodAllergenStatus(f.id),
+        daysTested,
+      };
+    })
+    .sort((a, b) => b.eatCount - a.eatCount);
 
-  const handleFoodClick = (_foodId: string, _foodName: string) => {
+  const handleFoodClick = (foodId: string, foodName: string) => {
+    setPrefillFood({ id: foodId, name: foodName });
     setShowPanel(true);
   };
 
@@ -139,9 +142,11 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                   ? '已排敏 ✓'
                   : food.allergenStatus === 'observing'
                     ? `排敏中 ${food.daysTested}/3天`
-                    : food.allergenStatus === 'allergic'
-                      ? '过敏 ✕'
-                      : '';
+                    : food.allergenStatus === 'suspected'
+                      ? '疑似过敏 ?'
+                      : food.allergenStatus === 'allergic'
+                        ? '过敏 ✕'
+                        : '';
 
                 return (
                   <button
@@ -237,7 +242,8 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
       <RecordPanel
         visible={showPanel}
         defaultDate={today()}
-        onClose={() => setShowPanel(false)}
+        prefillFood={prefillFood}
+        onClose={() => { setShowPanel(false); setPrefillFood(null); }}
         onSaved={forceRefresh}
       />
     </div>
