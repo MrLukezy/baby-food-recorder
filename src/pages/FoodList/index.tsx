@@ -4,7 +4,7 @@
 
 import { useState, useCallback } from 'react';
 import { REACTION_OPTIONS } from '../../types';
-import { getRecords, getPresetAllergens, getFoodLatestReaction, getFoodEatCount } from '../../store';
+import { getRecords, getPresetAllergens, getFoodAllergenStatus, getFoodEatCount } from '../../store';
 import { foodCategories, getAllFoods } from '../../config/foodConfig';
 import RecordPanel from '../../components/RecordPanel';
 import { today } from '../../utils/date';
@@ -17,6 +17,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const [, setRefresh] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPanel, setShowPanel] = useState(false);
+  const [listTab, setListTab] = useState<'tested' | 'untested'>('tested');
 
   const forceRefresh = useCallback(() => setRefresh(n => n + 1), []);
 
@@ -35,18 +36,29 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const untestedFoods = allFoods
     .filter(f => !appearedFoodIds.has(f.id))
     .filter(f => !searchQuery || f.name.includes(searchQuery))
-    .sort((a, b) => parseInt(a.recommendedAge) - parseInt(b.recommendedAge));
+    .sort((a, b) => {
+      // 先按致敏等级排序（低→中→高），再按月龄
+      const levelOrder = { low: 0, medium: 1, high: 2 };
+      const levelDiff = levelOrder[a.allergenLevel] - levelOrder[b.allergenLevel];
+      if (levelDiff !== 0) return levelDiff;
+      return parseInt(a.recommendedAge) - parseInt(b.recommendedAge);
+    });
 
-  // 已排敏的食物（按食用次数排序）
+  // 已排敏的食物（使用新排敏状态）
   const testedFoods = allFoods
     .filter(f => appearedFoodIds.has(f.id))
     .filter(f => !searchQuery || f.name.includes(searchQuery))
     .map(f => ({
       ...f,
       eatCount: getFoodEatCount(f.id) + (presets.includes(f.id) ? 1 : 0),
-      reaction: getFoodLatestReaction(f.id),
+      allergenStatus: getFoodAllergenStatus(f.id),
+      daysTested: new Set(allRecords.filter(r => r.foodId === f.id).map(r => r.date)).size,
     }))
-    .sort((a, b) => b.eatCount - a.eatCount);
+    .sort((a, b) => {
+      // 过敏的排后面，排敏中的靠前，完成的靠前
+      // 先按 eatCount 排序
+      return b.eatCount - a.eatCount;
+    });
 
   const handleFoodClick = (_foodId: string, _foodName: string) => {
     setShowPanel(true);
@@ -71,41 +83,6 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
           />
         </div>
 
-        {/* 未排敏食物 */}
-        {untestedFoods.length > 0 && (
-          <div className="bg-white rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm font-bold text-amber-800">尚未排敏的食物</span>
-              <span className="text-xs bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full">
-                {untestedFoods.length}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {untestedFoods.slice(0, 20).map(food => (
-                <button
-                  key={food.id}
-                  onClick={() => handleFoodClick(food.id, food.name)}
-                  className="flex items-center gap-2 bg-amber-50 rounded-lg px-3 py-2.5 hover:bg-amber-100 transition-colors text-left"
-                >
-                  <span className="text-base">{food.emoji}</span>
-                  <div>
-                    <div className="text-sm font-medium text-amber-900">{food.name}</div>
-                    <div className="text-xs text-amber-400">
-                      {food.allergenLevel === 'low' ? '低敏' : food.allergenLevel === 'medium' ? '中敏' : '高敏'}
-                      {' '}{food.recommendedAge}月
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {untestedFoods.length > 20 && (
-              <p className="text-xs text-amber-400 text-center mt-2">
-                还有 {untestedFoods.length - 20} 种，使用搜索查找
-              </p>
-            )}
-          </div>
-        )}
-
         {/* 分类快捷入口 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <h3 className="text-sm font-bold text-amber-800 mb-3">食物分类</h3>
@@ -123,16 +100,49 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
           </div>
         </div>
 
-        {/* 全部食物（按食用次数排序） */}
-        {testedFoods.length > 0 && (
+        {/* Tab 切换 */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setListTab('tested')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              listTab === 'tested'
+                ? 'bg-orange-400 text-white'
+                : 'bg-white text-amber-700 border border-amber-200'
+            }`}
+          >
+            已食用 ({testedFoods.length})
+          </button>
+          <button
+            onClick={() => setListTab('untested')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              listTab === 'untested'
+                ? 'bg-orange-400 text-white'
+                : 'bg-white text-amber-700 border border-amber-200'
+            }`}
+          >
+            未排敏 ({untestedFoods.length})
+          </button>
+        </div>
+
+        {/* 已食用食物列表 */}
+        {listTab === 'tested' && testedFoods.length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm">
             <h3 className="text-sm font-bold text-amber-800 mb-3">
               已食用食物
-              <span className="text-xs text-amber-400 ml-2">按食用次数排序</span>
+              <span className="text-xs text-amber-400 ml-2">3天排敏即完成</span>
             </h3>
             <div className="space-y-2">
               {testedFoods.map(food => {
-                const reactionOpt = REACTION_OPTIONS.find(o => o.value === food.reaction);
+                const reactionOpt = REACTION_OPTIONS.find(o => o.value === food.allergenStatus);
+                // 状态标签：3天完成 → 不过敏；< 3天 → 排敏中；过敏 → 过敏
+                const statusLabel = food.allergenStatus === 'safe'
+                  ? '已排敏 ✓'
+                  : food.allergenStatus === 'observing'
+                    ? `排敏中 ${food.daysTested}/3天`
+                    : food.allergenStatus === 'allergic'
+                      ? '过敏 ✕'
+                      : '';
+
                 return (
                   <button
                     key={food.id}
@@ -144,12 +154,25 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                       <span className="font-medium text-amber-900">{food.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {reactionOpt && (
+                      {/* 排敏天数进度 */}
+                      {food.allergenStatus === 'observing' && (
+                        <div className="flex gap-0.5">
+                          {[1, 2, 3].map(d => (
+                            <span
+                              key={d}
+                              className={`w-2 h-2 rounded-full ${
+                                d <= food.daysTested ? 'bg-yellow-400' : 'bg-gray-200'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {food.allergenStatus && (
                         <span
                           className="text-xs px-2 py-0.5 rounded-full text-white"
-                          style={{ backgroundColor: reactionOpt.color }}
+                          style={{ backgroundColor: reactionOpt?.color }}
                         >
-                          {reactionOpt.label}
+                          {statusLabel}
                         </span>
                       )}
                       <span className="text-sm text-amber-400">×{food.eatCount}</span>
@@ -158,6 +181,54 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {listTab === 'tested' && testedFoods.length === 0 && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm text-center text-amber-400">
+            <div className="text-3xl mb-2">🍽️</div>
+            <p className="text-sm">还没有食用记录，添加后在这里查看</p>
+          </div>
+        )}
+
+        {/* 未排敏食物 */}
+        {listTab === 'untested' && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-bold text-amber-800">尚未排敏的食物</span>
+              <span className="text-xs bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full">
+                {untestedFoods.length}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {untestedFoods.slice(0, 30).map(food => (
+                <button
+                  key={food.id}
+                  onClick={() => handleFoodClick(food.id, food.name)}
+                  className="flex items-center gap-2 bg-amber-50 rounded-lg px-3 py-2.5 hover:bg-amber-100 transition-colors text-left"
+                >
+                  <span className="text-base">{food.emoji}</span>
+                  <div>
+                    <div className="text-sm font-medium text-amber-900">{food.name}</div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className={`text-xs px-1 py-0.5 rounded ${
+                        food.allergenLevel === 'high' ? 'bg-red-50 text-red-500' :
+                        food.allergenLevel === 'medium' ? 'bg-yellow-50 text-yellow-500' :
+                        'bg-green-50 text-green-500'
+                      }`}>
+                        {food.allergenLevel === 'low' ? '低敏' : food.allergenLevel === 'medium' ? '中敏' : '高敏'}
+                      </span>
+                      <span className="text-xs text-amber-400">{food.recommendedAge}月</span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            {untestedFoods.length > 30 && (
+              <p className="text-xs text-amber-400 text-center mt-2">
+                还有 {untestedFoods.length - 30} 种，使用搜索查找
+              </p>
+            )}
           </div>
         )}
       </div>

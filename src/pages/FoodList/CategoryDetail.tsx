@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { foodCategories } from '../../config/foodConfig';
-import { getFoodLatestReaction, getFoodEatCount } from '../../store';
+import { getFoodAllergenStatus, getFoodEatCount, getRecords } from '../../store';
 import { REACTION_OPTIONS } from '../../types';
 
 interface CategoryDetailProps {
@@ -14,6 +14,7 @@ interface CategoryDetailProps {
 
 const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) => {
   const category = foodCategories.find(c => c.id === categoryId);
+  const allRecords = getRecords();
 
   if (!category) {
     return (
@@ -26,12 +27,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
   // 统计
   let safeCount = 0, observingCount = 0, allergicCount = 0;
   const foods = category.foods.map(food => {
-    const reaction = getFoodLatestReaction(food.id);
+    const reaction = getFoodAllergenStatus(food.id);
     const eatCount = getFoodEatCount(food.id);
+    const daysTested = new Set(
+      allRecords.filter(r => r.foodId === food.id).map(r => r.date)
+    ).size;
     if (reaction === 'safe') safeCount++;
     else if (reaction === 'observing') observingCount++;
     else if (reaction === 'allergic') allergicCount++;
-    return { ...food, reaction, eatCount };
+    return { ...food, reaction, eatCount, daysTested };
   }).sort((a, b) => {
     // 有记录的在前，按次数排序
     if (a.eatCount === 0 && b.eatCount === 0) return 0;
@@ -62,8 +66,8 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
         {/* 统计 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <div className="flex justify-between text-sm">
-            <span className="text-green-600">安全 <b>{safeCount}</b>种</span>
-            <span className="text-yellow-600">观察 <b>{observingCount}</b>种</span>
+            <span className="text-green-600">完成 <b>{safeCount}</b>种</span>
+            <span className="text-yellow-600">排敏中 <b>{observingCount}</b>种</span>
             <span className="text-red-600">过敏 <b>{allergicCount}</b>种</span>
             <span className="text-amber-400">未排敏 <b>{foods.length - safeCount - observingCount - allergicCount}</b>种</span>
           </div>
@@ -74,6 +78,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
           <div className="space-y-2">
             {foods.map(food => {
               const reactionOpt = REACTION_OPTIONS.find(o => o.value === food.reaction);
+              // 状态标签
+              const statusLabel = food.reaction === 'safe'
+                ? '已排敏 ✓'
+                : food.reaction === 'observing'
+                  ? `排敏中 ${food.daysTested}/3`
+                  : food.reaction === 'allergic'
+                    ? '过敏 ✕'
+                    : '';
+
               return (
                 <div
                   key={food.id}
@@ -91,13 +104,26 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* 排敏天数进度条 */}
+                    {food.reaction === 'observing' && (
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3].map(d => (
+                          <span
+                            key={d}
+                            className={`w-2 h-2 rounded-full ${
+                              d <= food.daysTested ? 'bg-yellow-400' : 'bg-gray-200'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    )}
                     {reactionOpt ? (
                       <>
                         <span
                           className="text-xs px-2 py-0.5 rounded-full text-white"
                           style={{ backgroundColor: reactionOpt.color }}
                         >
-                          {reactionOpt.label}
+                          {statusLabel}
                         </span>
                         <span className="text-sm text-amber-400">×{food.eatCount}</span>
                       </>

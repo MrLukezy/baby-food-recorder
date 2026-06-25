@@ -2,11 +2,10 @@
 // 首页 Tab
 // ============================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { BabyProfile, FoodRecord } from '../../types';
-import { REACTION_OPTIONS } from '../../types';
-import { getRecords, getStats, getRecordsByDate } from '../../store';
-import { foodCategories, getFoodEmoji } from '../../config/foodConfig';
+import { getRecords, getStats, getRecordsByDate, getFoodAllergenStatus, getPresetAllergens } from '../../store';
+import { foodCategories, getFoodEmoji, getAllFoods } from '../../config/foodConfig';
 import { today, getWeekDates, formatFriendlyDate, getMonthAge } from '../../utils/date';
 import RecordPanel from '../../components/RecordPanel';
 
@@ -15,12 +14,25 @@ interface HomeProps {
   onNavigateCategory: (categoryId: string) => void;
 }
 
+// 排敏小贴士（随机展示一条）
+const ALLERGY_TIPS = [
+  '每次只引入一种新食物，便于判断过敏源',
+  '每种新食物建议连续观察 3 天',
+  '新食物尽量安排在上午，方便观察',
+  '生病或接种疫苗期间不引入新食物',
+  '高敏食物（虾、蛋白、花生）需单独排敏',
+  '已排敏的食物可以和日常饮食搭配',
+  '出现皮疹、腹泻、呕吐应立即停止并记录',
+  '排敏失败后等 1-2 个月再微量重试',
+];
+
 const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   const [selectedDate, setSelectedDate] = useState(today());
   const [records, setRecords] = useState<FoodRecord[]>([]);
   const [stats, setStats] = useState({ total: 0, safe: 0, observing: 0, allergic: 0 });
   const [showPanel, setShowPanel] = useState(false);
   const [statFilter, setStatFilter] = useState<string | null>(null);
+  const [showAllRecords, setShowAllRecords] = useState(false);
 
   const refreshData = useCallback(() => {
     setRecords(getRecordsByDate(selectedDate));
@@ -33,31 +45,20 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   const age = getMonthAge(profile.birthday);
   const weekDayNames = ['一', '二', '三', '四', '五', '六', '日'];
 
-  // 按分类统计
-  const categoryStats = foodCategories.map(cat => {
-    const allRecs = getRecords();
-    const foodReactions = new Map<string, string>();
-    for (const food of cat.foods) {
-      const foodRecs = allRecs
-        .filter(r => r.foodId === food.id)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      if (foodRecs.length > 0) {
-        foodReactions.set(food.id, foodRecs[0].reaction);
-      }
-    }
-    let safe = 0, observing = 0, allergic = 0;
-    for (const reaction of foodReactions.values()) {
-      if (reaction === 'safe') safe++;
-      else if (reaction === 'observing') observing++;
-      else if (reaction === 'allergic') allergic++;
-    }
-    return { ...cat, safe, observing, allergic, total: foodReactions.size };
-  });
+  // 随机展示一条排敏贴士
+  const tipIndex = useMemo(() => Math.floor(Math.random() * ALLERGY_TIPS.length), []);
 
-  // 按日期筛选记录（用于统计弹窗）
-  const filteredRecords = statFilter
-    ? records.filter(r => r.reaction === statFilter || (statFilter === 'total'))
-    : records;
+  // 按分类统计（使用新排敏状态）
+  const categoryStats = foodCategories.map(cat => {
+    let safe = 0, observing = 0, allergic = 0;
+    for (const food of cat.foods) {
+      const status = getFoodAllergenStatus(food.id);
+      if (status === 'safe') safe++;
+      else if (status === 'observing') observing++;
+      else if (status === 'allergic') allergic++;
+    }
+    return { ...cat, safe, observing, allergic };
+  });
 
   const mealGroups = ['breakfast', 'lunch', 'snack', 'dinner'] as const;
   const mealIcons: Record<string, string> = {
@@ -65,6 +66,77 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   };
   const mealNames: Record<string, string> = {
     breakfast: '早餐', lunch: '午餐', snack: '下午加餐', dinner: '晚餐',
+  };
+
+  // ============ 所有排敏记录浮层数据 ============
+
+  const allRecordsData = useMemo(() => {
+    if (!showAllRecords) return null;
+
+    const allRecs = getRecords();
+    const presets = getPresetAllergens();
+    const allFoods = getAllFoods();
+
+    const foodMap = new Map<string, {
+      name: string; emoji: string; status: string;
+      eatCount: number; days: number; allergenLevel: string;
+    }>();
+
+    // 统计记录中的食物
+    for (const r of allRecs) {
+      if (!foodMap.has(r.foodId)) {
+        const info = allFoods.find(f => f.id === r.foodId);
+        foodMap.set(r.foodId, {
+          name: r.foodName,
+          emoji: getFoodEmoji(r.foodId),
+          status: 'unknown',
+          eatCount: 0,
+          days: 0,
+          allergenLevel: info?.allergenLevel || 'low',
+        });
+      }
+      const item = foodMap.get(r.foodId)!;
+      item.eatCount++;
+    }
+
+    // 预设食物
+    for (const id of presets) {
+      if (!foodMap.has(id)) {
+        const info = allFoods.find(f => f.id === id);
+        if (info) {
+          foodMap.set(id, {
+            name: info.name, emoji: info.emoji,
+            status: 'safe', eatCount: 0, days: 0,
+            allergenLevel: info.allergenLevel,
+          });
+        }
+      }
+    }
+
+    // 计算排敏状态
+    for (const [foodId, item] of foodMap) {
+      const status = getFoodAllergenStatus(foodId) || 'safe';
+      const days = new Set(allRecs.filter(r => r.foodId === foodId).map(r => r.date)).size;
+      item.status = status;
+      item.days = days;
+    }
+
+    return { foods: Array.from(foodMap.values()), total: foodMap.size };
+  }, [showAllRecords]);
+
+  // ============ 统计卡片点击处理 ============
+
+  const handleStatClick = (key: string) => {
+    if (statFilter === key) {
+      setStatFilter(null);
+    } else {
+      setStatFilter(key);
+      if (key === 'total') {
+        setShowAllRecords(true);
+      } else {
+        setShowAllRecords(false);
+      }
+    }
   };
 
   return (
@@ -92,18 +164,24 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
           </div>
         </div>
 
+        {/* 排敏小贴士 */}
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-2.5 flex items-center gap-2">
+          <span className="text-base">💡</span>
+          <p className="text-xs text-amber-700 leading-relaxed">{ALLERGY_TIPS[tipIndex]}</p>
+        </div>
+
         {/* 统计卡片 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <div className="grid grid-cols-4 gap-2">
             {[
               { key: 'total', label: '总记录', value: stats.total, color: 'bg-orange-50 text-orange-700' },
               { key: 'safe', label: '不过敏', value: stats.safe, color: 'bg-green-50 text-green-700' },
-              { key: 'observing', label: '观察中', value: stats.observing, color: 'bg-yellow-50 text-yellow-700' },
+              { key: 'observing', label: '排敏中', value: stats.observing, color: 'bg-yellow-50 text-yellow-700' },
               { key: 'allergic', label: '过敏源', value: stats.allergic, color: 'bg-red-50 text-red-700' },
             ].map(item => (
               <button
                 key={item.key}
-                onClick={() => setStatFilter(statFilter === item.key ? null : item.key)}
+                onClick={() => handleStatClick(item.key)}
                 className={`p-2 rounded-xl text-center transition-all ${
                   statFilter === item.key ? 'ring-2 ring-orange-300' : ''
                 } ${item.color}`}
@@ -130,7 +208,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
               return (
                 <button
                   key={d}
-                  onClick={() => { setSelectedDate(d); setStatFilter(null); }}
+                  onClick={() => { setSelectedDate(d); setStatFilter(null); setShowAllRecords(false); }}
                   className={`flex flex-col items-center py-1.5 rounded-xl transition-all ${
                     isSelected
                       ? 'bg-orange-400 text-white shadow-md'
@@ -162,15 +240,15 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
             {formatFriendlyDate(selectedDate)}的辅食记录
           </h3>
 
-          {(statFilter ? filteredRecords : records).length === 0 ? (
+          {records.length === 0 ? (
             <div className="text-center py-6 text-amber-400">
               <div className="text-3xl mb-2">📝</div>
-              <p className="text-sm">暂无记录，点击下方按钮添加</p>
+              <p className="text-sm">暂无记录，点击底部按钮添加</p>
             </div>
           ) : (
             <div className="space-y-3">
               {mealGroups.map(mealType => {
-                const mealRecords = (statFilter ? filteredRecords : records).filter(r => r.meal === mealType);
+                const mealRecords = records.filter(r => r.meal === mealType);
                 if (mealRecords.length === 0) return null;
                 return (
                   <div key={mealType}>
@@ -180,7 +258,15 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
                     </div>
                     <div className="space-y-1.5 ml-5">
                       {mealRecords.map(rec => {
-                        const reactionOpt = REACTION_OPTIONS.find(o => o.value === rec.reaction);
+                        // 使用新排敏状态来显示标签
+                        const allergenStatus = getFoodAllergenStatus(rec.foodId);
+                        const statusLabel = allergenStatus === 'safe'
+                          ? '已排敏'
+                          : allergenStatus === 'observing'
+                            ? '排敏中'
+                            : allergenStatus === 'allergic'
+                              ? '过敏'
+                              : '';
                         return (
                           <div
                             key={rec.id}
@@ -188,15 +274,27 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
                           >
                             <span className="text-base">{getFoodEmoji(rec.foodId)}</span>
                             <span className="text-sm font-medium text-amber-900">{rec.foodName}</span>
-                            <span
-                              className="text-xs px-1.5 py-0.5 rounded-full text-white"
-                              style={{ backgroundColor: reactionOpt?.color }}
-                            >
-                              {reactionOpt?.label}
-                            </span>
+                            {statusLabel && (
+                              <span
+                                className="text-xs px-1.5 py-0.5 rounded-full text-white"
+                                style={{
+                                  backgroundColor:
+                                    allergenStatus === 'safe' ? '#7BC67E' :
+                                    allergenStatus === 'observing' ? '#FFB347' :
+                                    '#FF6B6B',
+                                }}
+                              >
+                                {statusLabel}
+                              </span>
+                            )}
                             <span className="text-xs text-amber-400">
                               D{rec.dayCount.replace('day', '')}
                             </span>
+                            {rec.note && (
+                              <span className="text-xs text-amber-300 truncate max-w-[80px]">
+                                {rec.note}
+                              </span>
+                            )}
                           </div>
                         );
                       })}
@@ -240,15 +338,15 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
         </div>
       </div>
 
-      {/* 底部添加记录按钮（横向） */}
-      <div className="px-4 pb-24 pt-2">
-        <button
-          onClick={() => setShowPanel(true)}
-          className="w-full py-3.5 bg-orange-400 text-white rounded-xl font-bold text-base active:bg-orange-500 shadow-md shadow-orange-200 flex items-center justify-center gap-2"
-        >
-          <span className="text-xl">＋</span> 添加记录
-        </button>
-      </div>
+      {/* 悬浮添加记录按钮（固定在底部 tab bar 上方） */}
+      <button
+        onClick={() => setShowPanel(true)}
+        className="fixed right-5 z-[45] flex items-center gap-1.5 bg-orange-400 text-white rounded-full shadow-lg shadow-orange-200 px-4 py-3 font-medium text-sm active:bg-orange-500 active:scale-95 transition-all"
+        style={{ bottom: 'calc(64px + env(safe-area-inset-bottom, 0px) + 16px)' }}
+      >
+        <span className="text-lg">＋</span>
+        <span>添加记录</span>
+      </button>
 
       {/* 记录面板 */}
       <RecordPanel
@@ -257,6 +355,88 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
         onClose={() => setShowPanel(false)}
         onSaved={refreshData}
       />
+
+      {/* ============ 所有排敏记录浮层 ============ */}
+      {showAllRecords && allRecordsData && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowAllRecords(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
+              <h2 className="text-lg font-bold text-amber-900">所有排敏记录</h2>
+              <button onClick={() => setShowAllRecords(false)} className="text-gray-400 text-2xl">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1">
+              <p className="text-xs text-amber-400 mb-2">
+                共 {allRecordsData.total} 种食物已记录
+              </p>
+
+              {(() => {
+                const grouped = {
+                  safe: allRecordsData.foods.filter(f => f.status === 'safe'),
+                  observing: allRecordsData.foods.filter(f => f.status === 'observing'),
+                  allergic: allRecordsData.foods.filter(f => f.status === 'allergic'),
+                };
+                const sections = [
+                  { key: 'safe', label: '排敏完成（不过敏）', foods: grouped.safe, color: '#7BC67E' },
+                  { key: 'observing', label: '排敏中', foods: grouped.observing, color: '#FFB347' },
+                  { key: 'allergic', label: '过敏', foods: grouped.allergic, color: '#FF6B6B' },
+                ];
+
+                return sections.map(section => {
+                  if (section.foods.length === 0) return null;
+                  return (
+                    <div key={section.key} className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: section.color }}
+                        />
+                        <span className="text-sm font-bold text-amber-800">
+                          {section.label}
+                          <span className="text-xs text-amber-400 ml-1">({section.foods.length})</span>
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {section.foods
+                          .sort((a, b) => b.days - a.days || b.eatCount - a.eatCount)
+                          .map((food, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between bg-amber-50 rounded-xl px-3 py-2.5"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{food.emoji}</span>
+                                <span className="text-sm font-medium text-amber-900">{food.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {food.days > 0 && (
+                                  <span className="text-xs text-amber-400">
+                                    {food.days}天
+                                  </span>
+                                )}
+                                {food.eatCount > 0 && (
+                                  <span className="text-xs text-amber-400">×{food.eatCount}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+
+              {allRecordsData.total === 0 && (
+                <div className="text-center py-8 text-amber-400">
+                  <div className="text-3xl mb-2">📝</div>
+                  <p className="text-sm">暂无排敏记录</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

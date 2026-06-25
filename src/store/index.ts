@@ -85,46 +85,101 @@ export function savePresetAllergens(foodIds: string[]): void {
   localStorage.setItem(KEY_PRESET, JSON.stringify(foodIds));
 }
 
+// ============ 排敏状态判断（核心逻辑） ============
+
+/**
+ * 获取某个食物的排敏状态
+ *
+ * 规则：
+ * - 有任何 allergic 反应 → 'allergic'（过敏）
+ * - 连续记录了 3 个不同日期 且无过敏 → 'safe'（排敏完成/不过敏）
+ * - 不足 3 天 且无过敏 → 'observing'（排敏中）
+ * - 预设食物（无记录）→ 'safe'（默认安全）
+ * - 无任何数据 → null
+ */
+export function getFoodAllergenStatus(foodId: string): ReactionType | null {
+  const records = getRecords().filter(r => r.foodId === foodId);
+
+  if (records.length === 0) {
+    const presets = getPresetAllergens();
+    if (presets.includes(foodId)) return 'safe';
+    return null;
+  }
+
+  // 有任何一次过敏反应 → 整体判定过敏
+  const hasAllergic = records.some(r => r.reaction === 'allergic');
+  if (hasAllergic) return 'allergic';
+
+  // 统计不同日期数（去重）
+  const uniqueDays = new Set(records.map(r => r.date)).size;
+
+  // 3 天及以上排敏完成
+  return uniqueDays >= 3 ? 'safe' : 'observing';
+}
+
+/**
+ * 获取所有正在排敏中（不足3天）的食物列表
+ * 用于检测"同时排敏多个食物"的冲突
+ */
+export function getObservingFoods(): { foodId: string; foodName: string; dayCount: number }[] {
+  const records = getRecords();
+
+  // 按食物分组
+  const foodMap = new Map<string, { dates: Set<string>; name: string }>();
+  for (const r of records) {
+    if (!foodMap.has(r.foodId)) {
+      foodMap.set(r.foodId, { dates: new Set(), name: r.foodName });
+    }
+    foodMap.get(r.foodId)!.dates.add(r.date);
+  }
+
+  const observing: { foodId: string; foodName: string; dayCount: number }[] = [];
+
+  for (const [foodId, data] of foodMap) {
+    const hasAllergic = records.some(r => r.foodId === foodId && r.reaction === 'allergic');
+    const dayCount = data.dates.size;
+
+    // 正在排敏：不足3天 且 无过敏反应
+    if (!hasAllergic && dayCount < 3) {
+      observing.push({ foodId, foodName: data.name, dayCount });
+    }
+  }
+
+  return observing;
+}
+
 // ============ 统计 ============
 
 export function getStats(): { total: number; safe: number; observing: number; allergic: number } {
   const records = getRecords();
   const presetIds = getPresetAllergens();
 
-  // 统计记录中的反应
+  // 按食物分组统计排敏状态
+  const foodIds = new Set([
+    ...records.map(r => r.foodId),
+    ...presetIds,
+  ]);
+
   let safe = 0;
   let observing = 0;
   let allergic = 0;
 
-  // 按食物去重统计最新状态
-  const foodLatestReaction = new Map<string, ReactionType>();
-
-  // 先加入预设的（默认安全）
-  for (const id of presetIds) {
-    foodLatestReaction.set(id, 'safe');
-  }
-
-  // 按时间排序记录
-  const sorted = [...records].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const r of sorted) {
-    foodLatestReaction.set(r.foodId, r.reaction);
-  }
-
-  for (const reaction of foodLatestReaction.values()) {
-    if (reaction === 'safe') safe++;
-    else if (reaction === 'observing') observing++;
-    else if (reaction === 'allergic') allergic++;
+  for (const foodId of foodIds) {
+    const status = getFoodAllergenStatus(foodId);
+    if (status === 'safe') safe++;
+    else if (status === 'observing') observing++;
+    else if (status === 'allergic') allergic++;
   }
 
   return {
-    total: records.length + presetIds.length,
+    total: records.length,
     safe,
     observing,
     allergic,
   };
 }
 
-/** 获取某个食物的最新反应状态 */
+/** 获取某个食物的最新反应状态（按 record.reaction 字段） */
 export function getFoodLatestReaction(foodId: string): ReactionType | null {
   const records = getRecords()
     .filter(r => r.foodId === foodId)

@@ -5,8 +5,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { FoodRecord, MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../../types';
-import { searchFoods } from '../../config/foodConfig';
-import { addRecord, generateId } from '../../store';
+import { searchFoods, getAllFoods } from '../../config/foodConfig';
+import { addRecord, generateId, getObservingFoods } from '../../store';
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
@@ -27,6 +27,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
   const [note, setNote] = useState('');
   const [searchResults, setSearchResults] = useState<ReturnType<typeof searchFoods>>([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [warningMsg, setWarningMsg] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,6 +43,20 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
       setShowSearch(false);
     }
   }, [foodQuery]);
+
+  // 食物选中时自动检测排敏状态
+  useEffect(() => {
+    setWarningMsg('');
+    if (!selectedFoodId) return;
+
+    const allFoods = getAllFoods();
+    const foodInfo = allFoods.find(f => f.id === selectedFoodId);
+
+    // 高敏食物额外提醒
+    if (foodInfo?.allergenLevel === 'high') {
+      setWarningMsg(`⚠️ ${selectedFoodName} 属于高敏食物，建议格外注意观察宝宝反应`);
+    }
+  }, [selectedFoodId, selectedFoodName]);
 
   // 点击外部关闭搜索
   useEffect(() => {
@@ -64,6 +79,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
     setDayCount('day1');
     setNote('');
     setShowSearch(false);
+    setWarningMsg('');
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -77,6 +93,22 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
     if (!selectedFoodName.trim()) {
       alert('请选择或输入食物名称');
       return;
+    }
+
+    // ============ 同时排敏检测 ============
+    const observingFoods = getObservingFoods();
+    const isAlreadyObservingThis = observingFoods.some(f => f.foodId === selectedFoodId);
+
+    if (!isAlreadyObservingThis && observingFoods.length > 0) {
+      const names = observingFoods.map(f => f.foodName).join('、');
+      const confirmed = window.confirm(
+        `💡 排敏提醒\n\n` +
+        `当前已有食物正在排敏中：\n${names}\n\n` +
+        `不建议同时排敏两种食物，这样无法判断过敏源。\n` +
+        `建议等当前食物排敏完成（连续3天）后再引入新食物。\n\n` +
+        `确定要继续添加吗？`
+      );
+      if (!confirmed) return;
     }
 
     const record: FoodRecord = {
@@ -124,6 +156,14 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
 
         {/* 可滚动内容 */}
         <div className="flex-1 overflow-y-auto px-5 pb-4">
+          {/* 警告信息 */}
+          {warningMsg && (
+            <div className="mb-3 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 flex items-start gap-2">
+              <span className="text-sm flex-shrink-0">⚠️</span>
+              <p className="text-xs text-yellow-700 leading-relaxed">{warningMsg}</p>
+            </div>
+          )}
+
           {/* 日期 */}
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">日期</label>
@@ -177,10 +217,15 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
                   <button
                     key={food.id}
                     onClick={() => handleSelectFood(food)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-amber-50 border-b border-amber-100 last:border-0"
+                    className="w-full text-left px-4 py-2.5 hover:bg-amber-50 border-b border-amber-100 last:border-0 flex items-center justify-between"
                   >
-                    <span className="text-amber-900">{food.categoryIcon} {food.name}</span>
-                    <span className="text-xs text-amber-400 ml-2">({food.categoryName})</span>
+                    <div>
+                      <span className="text-amber-900">{food.categoryIcon} {food.name}</span>
+                      <span className="text-xs text-amber-400 ml-2">({food.categoryName})</span>
+                    </div>
+                    {food.allergenLevel === 'high' && (
+                      <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-500 rounded">高敏</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -208,9 +253,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
             </div>
           </div>
 
-          {/* 天数 */}
+          {/* 排敏天数说明 + 选择 */}
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">排敏天数</label>
+            <p className="text-xs text-amber-400 mb-2">连续 3 天无不良反应即为排敏完成</p>
             <div className="flex gap-2">
               {DAY_OPTIONS.map(opt => (
                 <button
@@ -234,7 +280,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, onClose
             <textarea
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="可选，记录宝宝的反应..."
+              placeholder="可选，记录宝宝的反应（如：口周小红疹、精神好等）..."
               rows={2}
               className="w-full px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 placeholder-amber-300 resize-none"
             />

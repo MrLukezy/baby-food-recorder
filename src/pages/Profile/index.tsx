@@ -2,11 +2,13 @@
 // 我的 Tab
 // ============================
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import type { BabyProfile } from '../../types';
-import { updateProfile, getStats, clearAllData } from '../../store';
+import { updateProfile, getStats, clearAllData, getFoodAllergenStatus, getPresetAllergens, getRecords } from '../../store';
 import { getMonthAge } from '../../utils/date';
-import { exportToExcel } from '../../utils/export';
+import { exportToExcel, isWeChatBrowser } from '../../utils/export';
+import { getAllFoods } from '../../config/foodConfig';
+import { getFoodEmoji } from '../../config/foodConfig';
 
 interface ProfileProps {
   profile: BabyProfile;
@@ -19,10 +21,64 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const [editingBirthday, setEditingBirthday] = useState(false);
   const [tempName, setTempName] = useState(profile.name);
   const [tempBirthday, setTempBirthday] = useState(profile.birthday);
+  const [showRecords, setShowRecords] = useState(false);
   const avatarRef = useRef<HTMLInputElement>(null);
 
   const stats = getStats();
   const age = getMonthAge(profile.birthday);
+  const inWeChat = isWeChatBrowser();
+
+  // ============ 所有排敏记录数据 ============
+  const allRecordsData = useMemo(() => {
+    if (!showRecords) return null;
+
+    const allRecs = getRecords();
+    const presets = getPresetAllergens();
+    const allFoods = getAllFoods();
+
+    const foodMap = new Map<string, {
+      name: string; emoji: string; status: string;
+      eatCount: number; days: number;
+    }>();
+
+    for (const r of allRecs) {
+      if (!foodMap.has(r.foodId)) {
+        foodMap.set(r.foodId, {
+          name: r.foodName,
+          emoji: getFoodEmoji(r.foodId),
+          status: 'unknown',
+          eatCount: 0,
+          days: 0,
+        });
+      }
+      foodMap.get(r.foodId)!.eatCount++;
+    }
+
+    for (const id of presets) {
+      if (!foodMap.has(id)) {
+        const info = allFoods.find(f => f.id === id);
+        if (info) {
+          foodMap.set(id, {
+            name: info.name, emoji: info.emoji,
+            status: 'safe', eatCount: 0, days: 0,
+          });
+        }
+      }
+    }
+
+    for (const [foodId, item] of foodMap) {
+      const status = getFoodAllergenStatus(foodId) || 'safe';
+      const days = new Set(
+        allRecs.filter(r => r.foodId === foodId).map(r => r.date)
+      ).size;
+      item.status = status;
+      item.days = days;
+    }
+
+    return { foods: Array.from(foodMap.values()), total: foodMap.size };
+  }, [showRecords]);
+
+  // ============ 回调函数 ============
 
   const handleAvatarUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -171,17 +227,39 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
         <div className="bg-white rounded-2xl p-5 shadow-sm">
           <h3 className="text-sm font-bold text-amber-800 mb-3">数据统计</h3>
           <div className="space-y-3">
-            {[
-              { label: '总记录次数', value: stats.total, color: 'text-orange-500' },
-              { label: '排敏成功次数', value: stats.safe, color: 'text-green-500' },
-              { label: '观察中次数', value: stats.observing, color: 'text-yellow-500' },
-              { label: '过敏源次数', value: stats.allergic, color: 'text-red-500' },
-            ].map(item => (
-              <div key={item.label} className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
-                <span className="text-sm text-amber-700">{item.label}</span>
-                <span className={`text-lg font-bold ${item.color}`}>{item.value}</span>
+            {/* 总记录次数 — 可点击展开查看所有排敏记录 */}
+            <button
+              onClick={() => setShowRecords(true)}
+              className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-amber-700">总记录次数</span>
+                <span className="text-xs text-amber-400">点击查看</span>
               </div>
-            ))}
+              <div className="flex items-center gap-1">
+                <span className="text-lg font-bold text-orange-500">{stats.total}</span>
+                <span className="text-amber-300">›</span>
+              </div>
+            </button>
+
+            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <span className="text-sm text-amber-700">排敏完成（不过敏）</span>
+              <span className="text-lg font-bold text-green-500">{stats.safe}</span>
+            </div>
+            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <span className="text-sm text-amber-700">排敏中</span>
+              <span className="text-lg font-bold text-yellow-500">{stats.observing}</span>
+            </div>
+            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3">
+              <span className="text-sm text-amber-700">过敏源</span>
+              <span className="text-lg font-bold text-red-500">{stats.allergic}</span>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-amber-100">
+            <p className="text-xs text-amber-400">
+              💡 排敏完成 = 连续 3 天无不良反应 | 排敏中 = 不足 3 天
+            </p>
           </div>
         </div>
 
@@ -194,7 +272,11 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
             <span className="text-2xl">📤</span>
             <div className="text-left">
               <p className="font-medium text-amber-900">导出数据</p>
-              <p className="text-xs text-amber-500">导出所有排敏和辅食记录为 Excel 文件</p>
+              <p className="text-xs text-amber-500">
+                {inWeChat
+                  ? '导出所有排敏和辅食记录（将复制为 CSV 格式）'
+                  : '导出所有排敏和辅食记录为 Excel 文件'}
+              </p>
             </div>
           </button>
 
@@ -210,6 +292,82 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
           </button>
         </div>
       </div>
+
+      {/* ============ 查看所有排敏记录浮层 ============ */}
+      {showRecords && allRecordsData && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowRecords(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
+              <h2 className="text-lg font-bold text-amber-900">
+                所有排敏记录
+                <span className="text-xs text-amber-400 ml-2">共 {allRecordsData.total} 种食物</span>
+              </h2>
+              <button onClick={() => setShowRecords(false)} className="text-gray-400 text-2xl">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1">
+              {(() => {
+                const grouped = {
+                  safe: allRecordsData.foods.filter(f => f.status === 'safe'),
+                  observing: allRecordsData.foods.filter(f => f.status === 'observing'),
+                  allergic: allRecordsData.foods.filter(f => f.status === 'allergic'),
+                };
+                const sections = [
+                  { key: 'safe', label: '排敏完成（不过敏）', foods: grouped.safe, color: '#7BC67E' },
+                  { key: 'observing', label: '排敏中', foods: grouped.observing, color: '#FFB347' },
+                  { key: 'allergic', label: '过敏', foods: grouped.allergic, color: '#FF6B6B' },
+                ];
+
+                return sections.map(section => {
+                  if (section.foods.length === 0) return null;
+                  return (
+                    <div key={section.key} className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: section.color }} />
+                        <span className="text-sm font-bold text-amber-800">
+                          {section.label}
+                          <span className="text-xs text-amber-400 ml-1">({section.foods.length})</span>
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {section.foods
+                          .sort((a, b) => b.days - a.days || b.eatCount - a.eatCount)
+                          .map((food, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between bg-amber-50 rounded-xl px-3 py-2.5"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{food.emoji}</span>
+                                <span className="text-sm font-medium text-amber-900">{food.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {food.days > 0 && (
+                                  <span className="text-xs text-amber-400">{food.days}天</span>
+                                )}
+                                {food.eatCount > 0 && (
+                                  <span className="text-xs text-amber-400">×{food.eatCount}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+
+              {allRecordsData.total === 0 && (
+                <div className="text-center py-8 text-amber-400">
+                  <div className="text-3xl mb-2">📝</div>
+                  <p className="text-sm">暂无排敏记录</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

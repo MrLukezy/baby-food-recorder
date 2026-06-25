@@ -21,6 +21,9 @@ body {
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+.safe-area-inset-bottom {
+  bottom: env(safe-area-inset-bottom, 0px);
+}
 
 /* 底部弹出面板动画 */
 @keyframes slideUp {

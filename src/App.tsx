@@ -1,8 +1,8 @@
 // ============================
-// 主应用入口（路由管理）
+// 主应用入口（路由管理 + 返回键导航）
 // ============================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BabyProfile } from './types';
 import { getProfile } from './store';
 import CreateBaby from './pages/Onboarding/CreateBaby';
@@ -23,6 +23,8 @@ type Page =
 function App() {
   const [profile, setProfile] = useState<BabyProfile | null>(null);
   const [page, setPage] = useState<Page>({ type: 'onboarding_create' });
+  // 记录最近一次由 popstate 恢复的状态，避免 useEffect 重复 push
+  const lastPopStatePage = useRef<string | null>(null);
 
   // 初始化：检查是否已有宝宝数据
   useEffect(() => {
@@ -32,6 +34,55 @@ function App() {
       setPage({ type: 'tab', tab: 'home' });
     }
   }, []);
+
+  // ============ 浏览器历史导航 ============
+
+  // 监听浏览器返回键
+  useEffect(() => {
+    const handler = (e: PopStateEvent) => {
+      const state = e.state as { tab?: TabKey; categoryId?: string } | null;
+      if (!state) return;
+
+      let newPage: Page;
+      if (state.categoryId) {
+        newPage = { type: 'category_detail', categoryId: state.categoryId };
+      } else {
+        newPage = { type: 'tab', tab: state.tab || 'home' };
+      }
+
+      // 标记这次 page 变化来自 popstate，阻止 useEffect 再次 push
+      lastPopStatePage.current = JSON.stringify(state);
+      setPage(newPage);
+    };
+
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+
+  // 当 page 变化时，将导航状态推入浏览器历史
+  useEffect(() => {
+    let stateObj: { tab?: TabKey; categoryId?: string } | null = null;
+
+    if (page.type === 'tab') {
+      stateObj = { tab: page.tab };
+    } else if (page.type === 'category_detail') {
+      stateObj = { categoryId: page.categoryId };
+    }
+
+    if (!stateObj) return;
+
+    const stateStr = JSON.stringify(stateObj);
+
+    // 如果是 popstate 恢复的状态，只 replace（不 push 重复条目）
+    if (lastPopStatePage.current === stateStr) {
+      lastPopStatePage.current = null;
+      window.history.replaceState(stateObj, '');
+    } else {
+      window.history.pushState(stateObj, '');
+    }
+  }, [page]);
+
+  // ============ 导航回调 ============
 
   const handleBabyCreated = useCallback((p: BabyProfile) => {
     setProfile(p);
