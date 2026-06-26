@@ -4,9 +4,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { MealType, ReactionType, DayCount } from '../../types';
-import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../../types';
-import { searchFoods, getAllFoods } from '../../config/foodConfig';
-import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus, getFoodObservingDays } from '../../store';
+import { MEAL_OPTIONS, REACTION_OPTIONS } from '../../types';
+import { searchFoods, getAllFoods, getFoodById, foodCategories } from '../../config/foodConfig';
+import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
@@ -32,7 +32,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   const [warningMsg, setWarningMsg] = useState('');
   const [reactionHint, setReactionHint] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
-  const [isFinalDecision, setIsFinalDecision] = useState(false);
+  const [recordCategoryId, setRecordCategoryId] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
 
   // 判断是否为编辑模式：加载已有记录
@@ -48,9 +48,13 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         setSelectedFoodId(existing.foodId);
         setSelectedFoodName(existing.foodName);
         setFoodQuery(existing.foodName);
+        setShowSearch(false);
         setReaction(existing.reaction);
         setDayCount(existing.dayCount);
         setNote(existing.note);
+        // 加载分类ID
+        const foodInfo = getFoodById(existing.foodId);
+        setRecordCategoryId(existing.categoryId || foodInfo?.categoryId || '');
         setIsEditMode(true);
         return;
       }
@@ -68,9 +72,12 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         setSelectedFoodId(existingRecord.foodId);
         setSelectedFoodName(existingRecord.foodName);
         setFoodQuery(existingRecord.foodName);
+        setShowSearch(false);
         setReaction(existingRecord.reaction);
         setDayCount(existingRecord.dayCount);
         setNote(existingRecord.note);
+        const foodInfo = getFoodById(existingRecord.foodId);
+        setRecordCategoryId(existingRecord.categoryId || foodInfo?.categoryId || '');
         setIsEditMode(true);
         return;
       }
@@ -83,23 +90,54 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       setSelectedFoodId(prefillFood.id);
       setSelectedFoodName(prefillFood.name);
       setFoodQuery(prefillFood.name);
+      setShowSearch(false);
       const status = getFoodAllergenStatus(prefillFood.id);
       if (status === 'safe') { setDayCount('day3'); setReaction('safe'); }
       else if (status === 'observing') { setReaction('observing'); }
       else if (status === 'suspected') { setReaction('suspected'); }
       else { setReaction('safe'); setDayCount('day1'); }
     }
+    // 预填食物时自动设置分类
+    if (prefillFood) {
+      const foodInfo = getFoodById(prefillFood.id);
+      if (foodInfo?.categoryId) {
+        setRecordCategoryId(foodInfo.categoryId);
+      } else {
+        // 自定义食材从已有记录拿分类
+        const existing = getRecords().find(r => r.foodId === prefillFood.id);
+        if (existing?.categoryId) {
+          setRecordCategoryId(existing.categoryId);
+        }
+      }
+    }
     setIsEditMode(false);
   }, [visible, editRecordId, prefillFood, defaultDate]);
 
   useEffect(() => {
-    if (foodQuery.trim().length > 0) {
-      setSearchResults(searchFoods(foodQuery));
-      setShowSearch(true);
+    const q = foodQuery.trim();
+    if (q.length > 0) {
+      const results = searchFoods(q);
+      setSearchResults(results);
+      // 如果未选中食物，尝试自动匹配：搜索列表里有一个完全匹配的食物名
+      if (!selectedFoodId || foodQuery !== selectedFoodName) {
+        const exactMatch = results.find(f => f.name === q);
+        if (exactMatch) {
+          // 自动选中
+          setSelectedFoodId(exactMatch.id);
+          setSelectedFoodName(exactMatch.name);
+          const foodInfo = getFoodById(exactMatch.id);
+          setRecordCategoryId(foodInfo?.categoryId || '');
+          setShowSearch(false);
+        } else {
+          setShowSearch(true);
+        }
+      }
     } else {
       setSearchResults([]);
       setShowSearch(false);
     }
+    // 注意：不要依赖 selectedFoodId/selectedFoodName，否则循环触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [foodQuery]);
 
   // 食物选中时自动检测排敏状态
@@ -159,10 +197,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setDayCount('day1');
     setNote('');
     setShowSearch(false);
+    setRecordCategoryId('');
     setWarningMsg('');
     setReactionHint('');
     setIsEditMode(false);
-    setIsFinalDecision(false);
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -171,6 +209,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setFoodQuery(food.name);
     setShowSearch(false);
     setReactionHint('');
+
+    // 设置分类ID
+    const foodInfo = getFoodById(food.id);
+    setRecordCategoryId(foodInfo?.categoryId || '');
 
     // 切换食物时检查是否同日期已有该食物记录
     if (!editRecordId) {
@@ -185,25 +227,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         setDayCount(existingRecord.dayCount);
         setNote(existingRecord.note);
         setIsEditMode(true);
-        setIsFinalDecision(false);
       } else {
-        // 新建模式，检查是否需要最终判断
-        const observingDays = getFoodObservingDays(food.id);
-        const hasSeriousReaction = getRecords()
-          .filter(r => r.foodId === food.id)
-          .some(r => r.reaction === 'allergic' || r.reaction === 'suspected');
-        
-        // 如果已观察3天及以上，且没有过敏/疑似过敏记录，建议给出最终判断
-        if (observingDays >= 3 && !hasSeriousReaction) {
-          setReactionHint(`✅ 该食物已经连续观察 ${observingDays} 天，是时候做出最终判断了。\n请选择"不过敏"或"过敏"完成排敏。`);
-          setIsFinalDecision(true);
-          setReaction('safe');
-          setDayCount('day3');
-        } else {
-          setIsFinalDecision(false);
-          setReaction('safe');
-          setDayCount('day1');
-        }
+        // 新建模式，用户自由选择天数
+        setReaction('safe');
+        setDayCount('day1');
       }
     }
   };
@@ -211,8 +238,16 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   // ============ 保存 ============
 
   const handleSave = () => {
-    if (!selectedFoodName.trim()) {
+    // 使用 foodQuery 作为食物名称（支持输入自定义食材）
+    const foodName = selectedFoodName.trim() || foodQuery.trim();
+    if (!foodName) {
       alert('请选择或输入食物名称');
+      return;
+    }
+
+    // 检查是否选择了分类
+    if (!recordCategoryId) {
+      alert('请选择该食物的分类');
       return;
     }
 
@@ -227,7 +262,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
           `💡 排敏提醒\n\n` +
           `当前已有食物正在排敏中：\n${names}\n\n` +
           `不建议同时排敏两种食物，这样无法判断过敏源。\n` +
-          `建议等当前食物排敏完成（连续3天）后再引入新食物。\n\n` +
+          `建议等当前食物排敏完成后再引入新食物。\n\n` +
           `确定要继续添加吗？`
         );
         if (!confirmed) return;
@@ -235,6 +270,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     }
 
     const foodId = selectedFoodId || 'custom_' + Date.now();
+    const saveCategoryId = recordCategoryId;
 
     // 编辑模式：更新已有记录
     if (editRecordId) {
@@ -242,10 +278,11 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         date,
         meal,
         foodId,
-        foodName: selectedFoodName.trim(),
+        foodName: foodName,
         reaction,
         dayCount,
         note: note.trim(),
+        categoryId: saveCategoryId,
       });
       resetForm();
       onSaved();
@@ -262,10 +299,11 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       // 更新已有记录
       updateRecord(existingRecord.id, {
         meal,
-        foodName: selectedFoodName.trim(),
+        foodName: foodName,
         reaction,
         dayCount,
         note: note.trim(),
+        categoryId: saveCategoryId,
       });
     } else {
       // 新增记录
@@ -274,11 +312,12 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         date,
         meal,
         foodId,
-        foodName: selectedFoodName.trim(),
+        foodName: foodName,
         reaction,
         dayCount,
         note: note.trim(),
         createdAt: new Date().toISOString(),
+        categoryId: saveCategoryId,
       });
     }
 
@@ -401,6 +440,29 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
               placeholder="搜索或输入食物名称..."
               className="w-full px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 placeholder-amber-300"
             />
+            {/* 始终显示分类选择区域 */}
+            {foodQuery.trim().length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-amber-500 mb-1.5">食物分类：</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {foodCategories.map(cat => (
+                    <button
+                      key={cat.id}
+                      onClick={() => {
+                        setRecordCategoryId(cat.id);
+                      }}
+                      className={`text-xs px-2.5 py-1.5 rounded-full border transition-colors ${
+                        recordCategoryId === cat.id
+                          ? 'bg-orange-400 text-white border-orange-400'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}
+                    >
+                      {cat.icon} {cat.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {showSearch && searchResults.length > 0 && (
               <div className="absolute left-0 right-0 mt-1 bg-white border border-amber-200 rounded-xl shadow-lg max-h-40 overflow-y-auto z-10">
                 {searchResults.map(food => (
@@ -426,58 +488,52 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">排敏反应</label>
             <div className="grid grid-cols-2 gap-2">
-              {REACTION_OPTIONS.map(opt => {
-                // 最终判断时禁用"观察中"
-                const isDisabled = isFinalDecision && opt.value === 'observing';
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => {
-                      if (isDisabled) return;
-                      setReaction(opt.value);
-                    }}
-                    disabled={isDisabled}
-                    className={`py-2.5 rounded-xl text-sm font-medium transition-colors border ${
-                      isDisabled
-                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                        : reaction === opt.value
-                          ? 'text-white border-transparent'
-                          : 'bg-white text-amber-700 border-amber-200'
-                    }`}
-                    style={!isDisabled && reaction === opt.value ? { backgroundColor: opt.color } : undefined}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-amber-400 mt-2">
-              {isFinalDecision && '已观察2天及以上，请选择最终结论'}
-              {!isFinalDecision && reaction === 'suspected' && '可能出现轻微过敏症状，建议回避 2 周后做回避触发实验'}
-              {!isFinalDecision && reaction === 'allergic' && '确认过敏，建议回避 1-2 个月再从微量开始重试'}
-              {!isFinalDecision && reaction === 'observing' && '正常排敏观察中，注意观察 2-4 小时'}
-              {!isFinalDecision && reaction === 'safe' && '无明显不良反应，继续观察'}
-            </p>
-          </div>
-
-          {/* 排敏天数 */}
-          <div className="mb-4">
-            <label className="text-sm text-amber-800 font-medium mb-1 block">排敏天数</label>
-            <p className="text-xs text-amber-400 mb-2">连续 3 天无不良反应即为排敏完成</p>
-            <div className="flex gap-2">
-              {DAY_OPTIONS.map(opt => (
+              {REACTION_OPTIONS.map(opt => (
                 <button
                   key={opt.value}
-                  onClick={() => setDayCount(opt.value)}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                    dayCount === opt.value
-                      ? 'bg-orange-400 text-white'
-                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  onClick={() => setReaction(opt.value)}
+                  className={`py-2.5 rounded-xl text-sm font-medium transition-colors border ${
+                    reaction === opt.value
+                      ? 'text-white border-transparent'
+                      : 'bg-white text-amber-700 border-amber-200'
                   }`}
+                  style={reaction === opt.value ? { backgroundColor: opt.color } : undefined}
                 >
                   {opt.label}
                 </button>
               ))}
+            </div>
+            <p className="text-xs text-amber-400 mt-2">
+              {reaction === 'suspected' && '可能出现轻微过敏症状，建议回避 2 周后做回避触发实验'}
+              {reaction === 'allergic' && '确认过敏，建议回避 1-2 个月再从微量开始重试'}
+              {reaction === 'observing' && '正常排敏观察中，注意观察 2-4 小时'}
+              {reaction === 'safe' && '无明显不良反应，继续观察'}
+            </p>
+          </div>
+
+          {/* 排敏天数 - 阶梯选择：选2亮1+2，选3亮1+2+3 */}
+          <div className="mb-4">
+            <label className="text-sm text-amber-800 font-medium mb-1 block">排敏天数</label>
+            <p className="text-xs text-amber-400 mb-2">选择 3 天 = 排敏完成</p>
+            <div className="flex gap-2">
+              {['day1' as DayCount, 'day2' as DayCount, 'day3' as DayCount].map(opt => {
+                const dayNum = Number(opt.replace('day', ''));
+                const selectedNum = Number(dayCount.replace('day', ''));
+                const isActive = dayNum <= selectedNum;
+                return (
+                  <button
+                    key={opt}
+                    onClick={() => setDayCount(opt)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-orange-400 text-white'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}
+                  >
+                    {opt === 'day3' ? '3 天 ✅ 排敏完成' : `${dayNum} 天`}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

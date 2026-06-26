@@ -93,6 +93,7 @@ export function savePresetAllergens(foodIds: string[]): void {
  * 规则：
  * - 有任何 allergic 反应 → 'allergic'（过敏）
  * - 有 suspected 反应，且无 allergic → 'suspected'（疑似过敏）
+ * - 标记了 day3（排敏完成）且无过敏/疑似 → 'safe'（排敏完成/不过敏）
  * - 连续记录了 3 个不同日期 且无过敏/疑似 → 'safe'（排敏完成/不过敏）
  * - 不足 3 天 且无过敏/疑似 → 'observing'（排敏中）
  * - 预设食物（无记录）→ 'safe'（默认安全，视为已完成3天排敏）
@@ -115,6 +116,10 @@ export function getFoodAllergenStatus(foodId: string): ReactionType | null {
   const hasSuspected = records.some(r => r.reaction === 'suspected');
   if (hasSuspected) return 'suspected';
 
+  // 如果手动标记了第3天（排敏完成）→ 直接判定排敏完成
+  const hasDay3Complete = records.some(r => r.dayCount === 'day3' && r.reaction === 'safe');
+  if (hasDay3Complete) return 'safe';
+
   // 统计不同日期数（去重）
   const uniqueDays = new Set(records.map(r => r.date)).size;
 
@@ -134,13 +139,16 @@ export function getFoodObservingDays(foodId: string): number {
 
 /**
  * 检查某食物是否处于"观察中"状态且还未有任何过敏/疑似过敏记录
- * 即：所有现有记录都是 safe 反应，但天数不足 3 天
+ * 即：所有现有记录都是 safe 反应，但天数不足 3 天且未手动标记排敏完成
  */
 export function isFoodStillObserving(foodId: string): boolean {
   const records = getRecords().filter(r => r.foodId === foodId);
   if (records.length === 0) return false;
   const hasSeriousReaction = records.some(r => r.reaction === 'allergic' || r.reaction === 'suspected');
   if (hasSeriousReaction) return false;
+  // 手动标记了 day3 排敏完成
+  const hasDay3Complete = records.some(r => r.dayCount === 'day3' && r.reaction === 'safe');
+  if (hasDay3Complete) return false;
   const days = new Set(records.map(r => r.date)).size;
   return days > 0 && days < 3;
 }
@@ -168,7 +176,9 @@ export function getObservingFoods(): { foodId: string; foodName: string; dayCoun
     const hasSuspected = records.some(r => r.foodId === foodId && r.reaction === 'suspected');
     const dayCount = data.dates.size;
 
-    // 正在排敏：不足3天 且 无过敏/疑似过敏反应
+    // 跳过已手动标记排敏完成的食物
+    const hasDay3Complete = records.some(r => r.foodId === foodId && r.dayCount === 'day3' && r.reaction === 'safe');
+    if (hasDay3Complete) continue;
     if (!hasAllergic && !hasSuspected && dayCount < 3) {
       observing.push({ foodId, foodName: data.name, dayCount });
     }

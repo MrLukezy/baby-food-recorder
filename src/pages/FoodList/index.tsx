@@ -52,8 +52,10 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
     .filter(f => !searchQuery || f.name.includes(searchQuery))
     .map(f => {
       const recordDays = new Set(allRecords.filter(r => r.foodId === f.id).map(r => r.date)).size;
+      // 手动标记 day3 排敏完成但只有 1 条记录，显示为 3 天
+      const hasDay3Mark = allRecords.some(r => r.foodId === f.id && r.dayCount === 'day3' && r.reaction === 'safe');
       // 预设食物无记录时显示为 3 天（排敏完成）
-      const daysTested = recordDays > 0 ? recordDays : (presets.includes(f.id) ? 3 : 0);
+      const daysTested = hasDay3Mark ? 3 : (recordDays > 0 ? recordDays : (presets.includes(f.id) ? 3 : 0));
       return {
         ...f,
         eatCount: getFoodEatCount(f.id) + (presets.includes(f.id) ? 1 : 0),
@@ -133,7 +135,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
           <div className="bg-white rounded-2xl p-4 shadow-sm">
             <h3 className="text-sm font-bold text-amber-800 mb-3">
               已食用食物
-              <span className="text-xs text-amber-400 ml-2">3天排敏即完成</span>
+              <span className="text-xs text-amber-400 ml-2">第3天=排敏完成</span>
             </h3>
             <div className="space-y-2">
               {testedFoods.map(food => {
