@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods } from '../../config/foodConfig';
-import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
+import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus, getFoodObservingDays } from '../../store';
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
@@ -32,6 +32,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   const [warningMsg, setWarningMsg] = useState('');
   const [reactionHint, setReactionHint] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
+  const [isFinalDecision, setIsFinalDecision] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   // 判断是否为编辑模式：加载已有记录
@@ -161,6 +162,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setWarningMsg('');
     setReactionHint('');
     setIsEditMode(false);
+    setIsFinalDecision(false);
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -168,6 +170,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setSelectedFoodName(food.name);
     setFoodQuery(food.name);
     setShowSearch(false);
+    setReactionHint('');
 
     // 切换食物时检查是否同日期已有该食物记录
     if (!editRecordId) {
@@ -182,6 +185,25 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         setDayCount(existingRecord.dayCount);
         setNote(existingRecord.note);
         setIsEditMode(true);
+        setIsFinalDecision(false);
+      } else {
+        // 新建模式，检查是否需要最终判断
+        const observingDays = getFoodObservingDays(food.id);
+        const hasSeriousReaction = getRecords()
+          .filter(r => r.foodId === food.id)
+          .some(r => r.reaction === 'allergic' || r.reaction === 'suspected');
+        
+        // 如果已观察3天及以上，且没有过敏/疑似过敏记录，建议给出最终判断
+        if (observingDays >= 3 && !hasSeriousReaction) {
+          setReactionHint(`✅ 该食物已经连续观察 ${observingDays} 天，是时候做出最终判断了。\n请选择"不过敏"或"过敏"完成排敏。`);
+          setIsFinalDecision(true);
+          setReaction('safe');
+          setDayCount('day3');
+        } else {
+          setIsFinalDecision(false);
+          setReaction('safe');
+          setDayCount('day1');
+        }
       }
     }
   };
@@ -404,26 +426,37 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
           <div className="mb-4">
             <label className="text-sm text-amber-800 font-medium mb-1 block">排敏反应</label>
             <div className="grid grid-cols-2 gap-2">
-              {REACTION_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setReaction(opt.value)}
-                  className={`py-2.5 rounded-xl text-sm font-medium transition-colors border ${
-                    reaction === opt.value
-                      ? 'text-white border-transparent'
-                      : 'bg-white text-amber-700 border-amber-200'
-                  }`}
-                  style={reaction === opt.value ? { backgroundColor: opt.color } : undefined}
-                >
-                  {opt.label}
-                </button>
-              ))}
+              {REACTION_OPTIONS.map(opt => {
+                // 最终判断时禁用"观察中"
+                const isDisabled = isFinalDecision && opt.value === 'observing';
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      if (isDisabled) return;
+                      setReaction(opt.value);
+                    }}
+                    disabled={isDisabled}
+                    className={`py-2.5 rounded-xl text-sm font-medium transition-colors border ${
+                      isDisabled
+                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                        : reaction === opt.value
+                          ? 'text-white border-transparent'
+                          : 'bg-white text-amber-700 border-amber-200'
+                    }`}
+                    style={!isDisabled && reaction === opt.value ? { backgroundColor: opt.color } : undefined}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
             <p className="text-xs text-amber-400 mt-2">
-              {reaction === 'suspected' && '可能出现轻微过敏症状，建议回避 2 周后做回避触发实验'}
-              {reaction === 'allergic' && '确认过敏，建议回避 1-2 个月再从微量开始重试'}
-              {reaction === 'observing' && '正常排敏观察中，注意观察 2-4 小时'}
-              {reaction === 'safe' && '无明显不良反应，继续观察'}
+              {isFinalDecision && '已观察2天及以上，请选择最终结论'}
+              {!isFinalDecision && reaction === 'suspected' && '可能出现轻微过敏症状，建议回避 2 周后做回避触发实验'}
+              {!isFinalDecision && reaction === 'allergic' && '确认过敏，建议回避 1-2 个月再从微量开始重试'}
+              {!isFinalDecision && reaction === 'observing' && '正常排敏观察中，注意观察 2-4 小时'}
+              {!isFinalDecision && reaction === 'safe' && '无明显不良反应，继续观察'}
             </p>
           </div>
 

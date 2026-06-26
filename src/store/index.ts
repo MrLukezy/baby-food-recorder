@@ -123,6 +123,29 @@ export function getFoodAllergenStatus(foodId: string): ReactionType | null {
 }
 
 /**
+ * 获取某个食物的已观察天数（去重日期数）
+ * 返回 0 表示无任何记录
+ */
+export function getFoodObservingDays(foodId: string): number {
+  const records = getRecords().filter(r => r.foodId === foodId);
+  if (records.length === 0) return 0;
+  return new Set(records.map(r => r.date)).size;
+}
+
+/**
+ * 检查某食物是否处于"观察中"状态且还未有任何过敏/疑似过敏记录
+ * 即：所有现有记录都是 safe 反应，但天数不足 3 天
+ */
+export function isFoodStillObserving(foodId: string): boolean {
+  const records = getRecords().filter(r => r.foodId === foodId);
+  if (records.length === 0) return false;
+  const hasSeriousReaction = records.some(r => r.reaction === 'allergic' || r.reaction === 'suspected');
+  if (hasSeriousReaction) return false;
+  const days = new Set(records.map(r => r.date)).size;
+  return days > 0 && days < 3;
+}
+
+/**
  * 获取所有正在排敏中（不足3天）的食物列表
  * 用于检测"同时排敏多个食物"的冲突
  */
