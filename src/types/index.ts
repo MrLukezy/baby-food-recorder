@@ -18,7 +18,7 @@ export type MealType = 'breakfast' | 'lunch' | 'snack' | 'dinner';
 /** 排敏反应 */
 export type ReactionType = 'safe' | 'observing' | 'suspected' | 'allergic';
 
-/** 排敏天数 */
+/** 排敏天数：1=第一天，2=第二天，3=已排敏三天/排敏完成 */
 export type DayCount = 'day1' | 'day2' | 'day3';
 
 /** 食物记录 */
@@ -36,6 +36,8 @@ export interface FoodRecord {
   suspectedAt?: string; // 首次标记疑似过敏的日期
   retestDate?: string; // 回避触发实验建议日期
   retestResult?: 'confirmed_allergic' | 'confirmed_safe' | 'pending'; // 回避实验结果
+  // 自定义食材关联的食物分类
+  categoryId?: string;
 }
 
 /** 食物项 */
@@ -72,9 +74,9 @@ export const REACTION_OPTIONS: { value: ReactionType; label: string; color: stri
 ];
 
 export const DAY_OPTIONS: { value: DayCount; label: string }[] = [
-  { value: 'day1', label: '第一天' },
-  { value: 'day2', label: '第二天' },
-  { value: 'day3', label: '第三天' },
+  { value: 'day1', label: '1 天' },
+  { value: 'day2', label: '2 天' },
+  { value: 'day3', label: '3 天 ✅ 排敏完成' },
 ];
 
 export const ALLERGEN_LEVEL_LABELS: Record<string, string> = {

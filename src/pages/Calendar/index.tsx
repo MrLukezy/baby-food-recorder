@@ -281,7 +281,7 @@ const CalendarPage: React.FC = () => {
                             {reactionOpt?.label}
                           </span>
                           <span className="text-xs text-amber-400">
-                            D{rec.dayCount.replace('day', '')}
+                            {rec.dayCount === 'day3' ? '✅排敏完成' : `第${rec.dayCount.replace('day', '')}天`}
                           </span>
                         </div>
                         {rec.note && (

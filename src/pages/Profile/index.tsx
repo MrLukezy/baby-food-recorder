@@ -7,8 +7,8 @@ import type { BabyProfile } from '../../types';
 import { updateProfile, getStats, clearAllData, getFoodAllergenStatus, getPresetAllergens, getRecords } from '../../store';
 import { getMonthAge } from '../../utils/date';
 import { exportToExcel, isWeChatBrowser } from '../../utils/export';
-import { getAllFoods } from '../../config/foodConfig';
-import { getFoodEmoji } from '../../config/foodConfig';
+import { getAllFoods, getFoodById } from '../../config/foodConfig';
+import { getFoodEmoji, foodCategories } from '../../config/foodConfig';
 
 interface ProfileProps {
   profile: BabyProfile;
@@ -41,16 +41,21 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
     const foodMap = new Map<string, {
       name: string; emoji: string; status: string;
       eatCount: number; days: number;
+      categoryId: string; categoryName: string; categoryIcon: string;
     }>();
 
     for (const r of allRecs) {
       if (!foodMap.has(r.foodId)) {
+        const foodInfo = getFoodById(r.foodId);
         foodMap.set(r.foodId, {
           name: r.foodName,
           emoji: getFoodEmoji(r.foodId),
           status: 'unknown',
           eatCount: 0,
           days: 0,
+          categoryId: foodInfo?.categoryId || r.categoryId || 'custom',
+          categoryName: foodInfo?.categoryName || (r.categoryId ? (foodCategories.find(c=>c.id===r.categoryId)?.name || '自定义') : '自定义'),
+          categoryIcon: foodInfo?.categoryIcon || (r.categoryId ? (foodCategories.find(c=>c.id===r.categoryId)?.icon || '🍽️') : '🍽️'),
         });
       }
       foodMap.get(r.foodId)!.eatCount++;
@@ -63,6 +68,9 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
           foodMap.set(id, {
             name: info.name, emoji: info.emoji,
             status: 'safe', eatCount: 0, days: 0,
+            categoryId: info.categoryId,
+            categoryName: info.categoryName,
+            categoryIcon: info.categoryIcon || '🍽️',
           });
         }
       }
@@ -73,9 +81,11 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       const days = new Set(
         allRecs.filter(r => r.foodId === foodId).map(r => r.date)
       ).size;
+      // 如果手动标记了 day3 排敏完成但只有 1 条记录，显示为 3 天
+      const hasDay3Mark = allRecs.some(r => r.foodId === foodId && r.dayCount === 'day3' && r.reaction === 'safe');
       item.status = status;
       // 预设食物（无记录）显示为 3 天（排敏完成）
-      item.days = presets.includes(foodId) && days === 0 ? 3 : days;
+      item.days = presets.includes(foodId) && days === 0 ? 3 : (hasDay3Mark ? 3 : days);
     }
 
     return { foods: Array.from(foodMap.values()), total: foodMap.size };
@@ -289,7 +299,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
 
           <div className="mt-3 pt-3 border-t border-amber-100">
             <p className="text-xs text-amber-400">
-              💡 排敏完成 = 连续 3 天无不良反应 | 排敏中 = 不足 3 天
+              💡 排敏完成 = 选择第 3 天（排敏完成）或连续 3 天无不良反应
             </p>
           </div>
         </div>
@@ -366,60 +376,86 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
 
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1">
               {(() => {
-                const grouped = {
-                  safe: allRecordsData.foods.filter(f => f.status === 'safe'),
-                  suspected: allRecordsData.foods.filter(f => f.status === 'suspected'),
-                  observing: allRecordsData.foods.filter(f => f.status === 'observing'),
-                  allergic: allRecordsData.foods.filter(f => f.status === 'allergic'),
-                };
-                const sections = [
-                  { key: 'safe', label: '排敏完成（不过敏）', foods: grouped.safe, color: '#7BC67E' },
-                  { key: 'suspected', label: '疑似过敏（待回避触发实验）', foods: grouped.suspected, color: '#F59E0B' },
-                  { key: 'observing', label: '排敏中', foods: grouped.observing, color: '#FFB347' },
-                  { key: 'allergic', label: '过敏', foods: grouped.allergic, color: '#FF6B6B' },
-                ].filter(s => !statFilter || s.key === statFilter);
+                const statusGroups = [
+                  { key: 'safe', label: '✅ 排敏完成（不过敏）', color: '#7BC67E' },
+                  { key: 'observing', label: '⏳ 排敏中', color: '#FFB347' },
+                  { key: 'suspected', label: '⚠️ 疑似过敏', color: '#F59E0B' },
+                  { key: 'allergic', label: '❌ 过敏源', color: '#FF6B6B' },
+                ].filter(sg => !statFilter || sg.key === statFilter);
 
-                return sections.map(section => {
-                  if (section.foods.length === 0) {
-                    return (
-                      <div key={section.key} className="text-center py-6 text-amber-400">
-                        <div className="text-3xl mb-2">🍽️</div>
-                        <p className="text-sm">该分类暂无食物</p>
-                      </div>
-                    );
+                const categoryOrder = foodCategories.map(c => c.id);
+
+                return statusGroups.map(sg => {
+                  const foodsOfStatus = allRecordsData.foods.filter(f => f.status === sg.key);
+
+                  // 按分类分组
+                  const byCategory = new Map<string, typeof foodsOfStatus>();
+                  for (const food of foodsOfStatus) {
+                    const catKey = food.categoryId || 'custom';
+                    if (!byCategory.has(catKey)) byCategory.set(catKey, []);
+                    byCategory.get(catKey)!.push(food);
                   }
+
+                  const sortedCategories = Array.from(byCategory.entries()).sort(([aId], [bId]) => {
+                    const ai = categoryOrder.indexOf(aId);
+                    const bi = categoryOrder.indexOf(bId);
+                    if (ai === -1 && bi === -1) return aId.localeCompare(bId);
+                    if (ai === -1) return 1;
+                    if (bi === -1) return -1;
+                    return ai - bi;
+                  });
+
                   return (
-                    <div key={section.key} className="mb-4">
+                    <div key={sg.key} className="mb-5">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: section.color }} />
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: sg.color }} />
                         <span className="text-sm font-bold text-amber-800">
-                          {section.label}
-                          <span className="text-xs text-amber-400 ml-1">({section.foods.length})</span>
+                          {sg.label}
+                          <span className="text-xs text-amber-400 ml-1">({foodsOfStatus.length}种)</span>
                         </span>
                       </div>
-                      <div className="space-y-1.5">
-                        {section.foods
-                          .sort((a, b) => b.days - a.days || b.eatCount - a.eatCount)
-                          .map((food, i) => (
-                            <div
-                              key={i}
-                              className="flex items-center justify-between bg-amber-50 rounded-xl px-3 py-2.5"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-base">{food.emoji}</span>
-                                <span className="text-sm font-medium text-amber-900">{food.name}</span>
+
+                      {foodsOfStatus.length === 0 ? (
+                        <p className="text-xs text-amber-300 ml-4 mb-3">暂无食物</p>
+                      ) : (
+                        sortedCategories.map(([catId, catFoods]) => {
+                          const catInfo = foodCategories.find(c => c.id === catId);
+                          const catName = catInfo?.name || (catId === 'custom' ? '自定义' : catId);
+                          const catIcon = catInfo?.icon || catFoods[0]?.categoryIcon || '🍽️';
+                          return (
+                            <div key={catId} className="mb-3 ml-2">
+                              <div className="flex items-center gap-1 mb-1.5">
+                                <span className="text-xs">{catIcon}</span>
+                                <span className="text-xs text-amber-600 font-medium">{catName}</span>
+                                <span className="text-xs text-amber-300">({catFoods.length})</span>
                               </div>
-                              <div className="flex items-center gap-2">
-                                {food.days > 0 && (
-                                  <span className="text-xs text-amber-400">{food.days}天</span>
-                                )}
-                                {food.eatCount > 0 && (
-                                  <span className="text-xs text-amber-400">×{food.eatCount}</span>
-                                )}
+                              <div className="space-y-1 ml-4">
+                                {catFoods
+                                  .sort((a, b) => b.days - a.days || b.eatCount - a.eatCount)
+                                  .map((food, i) => (
+                                    <div
+                                      key={i}
+                                      className="flex items-center justify-between bg-amber-50/70 rounded-lg px-3 py-2"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm">{food.emoji}</span>
+                                        <span className="text-sm font-medium text-amber-900">{food.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {food.days > 0 && (
+                                          <span className="text-xs text-amber-400">{food.days}天</span>
+                                        )}
+                                        {food.eatCount > 0 && (
+                                          <span className="text-xs text-amber-400">×{food.eatCount}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
                               </div>
                             </div>
-                          ))}
-                      </div>
+                          );
+                        })
+                      )}
                     </div>
                   );
                 });

@@ -29,9 +29,11 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
   const foods = category.foods.map(food => {
     const reaction = getFoodAllergenStatus(food.id);
     const eatCount = getFoodEatCount(food.id);
-    const daysTested = new Set(
+    const recordDays = new Set(
       allRecords.filter(r => r.foodId === food.id).map(r => r.date)
     ).size;
+    const hasDay3Mark = allRecords.some(r => r.foodId === food.id && r.dayCount === 'day3' && r.reaction === 'safe');
+    const daysTested = hasDay3Mark ? 3 : recordDays;
     if (reaction === 'safe') safeCount++;
     else if (reaction === 'observing') observingCount++;
     else if (reaction === 'suspected') suspectedCount++;
@@ -84,7 +86,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
               const statusLabel = food.reaction === 'safe'
                 ? '已排敏 ✓'
                 : food.reaction === 'observing'
-                  ? `排敏中 ${food.daysTested}/3`
+                  ? `排敏中 ${food.daysTested}/3天`
                   : food.reaction === 'suspected'
                     ? '疑似过敏 ?'
                     : food.reaction === 'allergic'
