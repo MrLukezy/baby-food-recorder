@@ -1,8 +1,58 @@
 /**
- * AI 对话数据管理 - 多会话 + 记忆系统（localStorage 持久化）
+ * AI 对话数据管理 - 多会话 + 记忆系统（localStorage 持久化 + 服务端同步）
  */
 
 import type { ChatMessage } from './ai';
+
+const SYNC_URL = import.meta.env.DEV
+  ? 'http://127.0.0.1:3003/api'
+  : '/babyfoodrecorder/api';
+
+// ============ 初始化加载：从服务端拉取数据到本地 localStorage ============
+
+export async function loadChatDataFromServer(): Promise<void> {
+  try {
+    const res = await fetch(`${SYNC_URL}/conversations`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        localStorage.setItem('ai_conversations', JSON.stringify(data));
+      }
+    }
+    const res2 = await fetch(`${SYNC_URL}/memories`);
+    if (res2.ok) {
+      const data = await res2.json();
+      if (Array.isArray(data)) {
+        localStorage.setItem('ai_agent_memory', JSON.stringify(data));
+      }
+    }
+    console.log('聊天数据从服务端强制刷新加载完成');
+  } catch { /* ignore */ }
+}
+
+// ============ 服务端同步 ============
+
+async function syncConversations(): Promise<void> {
+  try {
+    const convs = getConversations();
+    await fetch(`${SYNC_URL}/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'replace', data: convs }),
+    });
+  } catch { /* ignore */ }
+}
+
+async function syncMemories(): Promise<void> {
+  try {
+    const mems = getMemories();
+    await fetch(`${SYNC_URL}/memories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mems),
+    });
+  } catch { /* ignore */ }
+}
 
 export interface Conversation {
   id: string;
@@ -25,7 +75,6 @@ const KEY_MEMORY = 'ai_agent_memory';
 
 // ============ 系统提示词 ============
 
-/** 宝宝辅食规划管理师的系统提示词 */
 export const SYSTEM_PROMPT = `你是一位专业的宝宝辅食规划管理师，拥有以下专业背景：
 
 【专业知识】
@@ -64,6 +113,7 @@ export function getConversations(): Conversation[] {
 
 export function saveConversations(list: Conversation[]): void {
   localStorage.setItem(KEY_CONVERSATIONS, JSON.stringify(list));
+  syncConversations();
 }
 
 export function createConversation(title?: string): Conversation {
@@ -122,6 +172,7 @@ export function getMemories(): AIAgentMemory[] {
 
 export function saveMemories(list: AIAgentMemory[]): void {
   localStorage.setItem(KEY_MEMORY, JSON.stringify(list));
+  syncMemories();
 }
 
 export function addMemory(key: string, value: string, source: string): void {

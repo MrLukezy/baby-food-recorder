@@ -4,7 +4,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BabyProfile } from './types';
-import { getProfile } from './store';
+import { getProfile, getRecords, getPresetAllergens, loadDataFromServer } from './store';
+import { loadChatDataFromServer, getConversations, getMemories } from './utils/chatStore';
 import CreateBaby from './pages/Onboarding/CreateBaby';
 import SelectFoods from './pages/Onboarding/SelectFoods';
 import Home from './pages/Home';
@@ -60,20 +61,27 @@ function App() {
     currentPageRef.current = page;
   }, [page]);
 
-  // ============ 初始化 ============
+  // ============ 初始化 + 全量同步到服务端 ============
   useEffect(() => {
-    const existing = getProfile();
-    if (existing) {
-      setProfile(existing);
-      // 检查 URL hash，如果有则使用，否则设置默认
-      const hashPage = parseHash(window.location.hash);
-      if (hashPage) {
-        setPage(hashPage);
-      } else {
-        setPage({ type: 'tab', tab: 'home' });
-        window.location.hash = '#home';
+    // ===== 初始化：从服务端拉取数据填充 localStorage（仅首次且本地为空时） =====
+    const init = async () => {
+      await loadDataFromServer();
+      await loadChatDataFromServer();
+
+      // 设置页面状态
+      const existing = getProfile();
+      if (existing) {
+        setProfile(existing);
+        const hashPage = parseHash(window.location.hash);
+        if (hashPage) {
+          setPage(hashPage);
+        } else {
+          setPage({ type: 'tab', tab: 'home' });
+          window.location.hash = '#home';
+        }
       }
-    }
+    };
+    init();
   }, []);
 
   // ============ Hash 路由监听 ============
@@ -148,6 +156,56 @@ function App() {
     setPage({ type: 'chat' });
   }, []);
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  const handleForceSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncMsg('同步中...');
+    try {
+      const BASE_URL = import.meta.env.DEV
+        ? 'http://127.0.0.1:3003/api'
+        : '/babyfoodrecorder/api';
+
+      const profile = getProfile();
+      const records = getRecords();
+      const presets = getPresetAllergens();
+      const convs = getConversations();
+      const mems = getMemories();
+
+      await Promise.all([
+        fetch(BASE_URL + '/profile', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(profile || {}),
+        }),
+        fetch(BASE_URL + '/records', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'replace', records }),
+        }),
+        fetch(BASE_URL + '/presets', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(presets),
+        }),
+        fetch(BASE_URL + '/conversations', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'replace', data: convs }),
+        }),
+        fetch(BASE_URL + '/memories', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mems),
+        }),
+      ]);
+
+      setSyncMsg('✅ 同步成功');
+      setTimeout(() => setSyncMsg(''), 2000);
+    } catch (e) {
+      setSyncMsg('❌ 同步失败');
+      setTimeout(() => setSyncMsg(''), 3000);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
   // ============ 路由渲染 ============
 
   // 引导页：创建宝宝
@@ -205,6 +263,27 @@ function App() {
           />
         )}
         <TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />
+
+        {/* 数据同步按钮 */}
+        <button
+          onClick={handleForceSync}
+          disabled={syncing}
+          title="将所有数据同步到服务器，实现多设备共享"
+          className={`fixed bottom-20 right-4 z-50 w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${
+            syncing
+              ? 'bg-blue-300 cursor-not-allowed'
+              : 'bg-blue-500 hover:bg-blue-600 active:scale-95'
+          } text-white text-lg`}
+        >
+          {syncing ? '⏳' : '☁️'}
+        </button>
+
+        {/* 同步提示 */}
+        {syncMsg && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm shadow-lg">
+            {syncMsg}
+          </div>
+        )}
       </div>
     );
   }
