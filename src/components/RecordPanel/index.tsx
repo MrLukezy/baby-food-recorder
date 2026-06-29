@@ -249,10 +249,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       return;
     }
 
-    // 检查是否选择了分类
+    // 检查是否选择了分类，未选则默认为「其他」
     if (!recordCategoryId) {
-      alert('请选择该食物的分类');
-      return;
+      setRecordCategoryId('other');
     }
 
     // 同时排敏检测（仅新建时）

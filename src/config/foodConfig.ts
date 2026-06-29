@@ -128,6 +128,12 @@ export const foodCategories: FoodCategory[] = [
       { id: 'd_huangyou', name: '黄油', emoji: '🧈', allergenLevel: 'medium', recommendedAge: '8+' },
     ],
   },
+  {
+    id: 'other',
+    name: '其他',
+    icon: '📦',
+    foods: [],
+  },
 ];
 
 /** 获取所有食物的扁平列表 */
