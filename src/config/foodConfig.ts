@@ -165,3 +165,69 @@ export function getFoodEmoji(foodId: string): string {
   const food = getFoodById(foodId);
   return food?.emoji || '🍽️';
 }
+
+// ============ 自定义食物管理（localStorage 持久化）============
+
+const KEY_CUSTOM_FOODS = 'baby_food_custom_foods';
+
+interface CustomFood {
+  id: string;
+  name: string;
+  categoryId: string;
+  allergenLevel: string; // 'low' | 'medium' | 'high' | 'avoid'
+  createdAt: string;
+}
+
+function getRawCustomFoods(): CustomFood[] {
+  try {
+    return JSON.parse(localStorage.getItem(KEY_CUSTOM_FOODS) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveRawCustomFoods(foods: CustomFood[]): void {
+  localStorage.setItem(KEY_CUSTOM_FOODS, JSON.stringify(foods));
+}
+
+/** 在当前分类下添加一种自定义食物 */
+export function addCustomFood(name: string, categoryId: string, allergenLevel: string = 'low'): void {
+  const foods = getRawCustomFoods();
+  const id = 'custom_' + Date.now();
+  foods.push({ id, name: name.trim(), categoryId, allergenLevel, createdAt: new Date().toISOString() });
+  saveRawCustomFoods(foods);
+}
+
+/** 删除一种自定义食物 */
+export function deleteCustomFood(foodId: string): void {
+  const foods = getRawCustomFoods().filter(f => f.id !== foodId);
+  saveRawCustomFoods(foods);
+}
+
+/** 更新自定义食物名称 */
+export function updateCustomFood(foodId: string, newName: string): void {
+  const foods = getRawCustomFoods();
+  const food = foods.find(f => f.id === foodId);
+  if (food) {
+    food.name = newName.trim();
+    saveRawCustomFoods(foods);
+  }
+}
+
+/** 获取自定义食物的致敏等级 */
+export function getCustomFoodAllergenLevel(foodId: string): string | null {
+  const food = getRawCustomFoods().find(f => f.id === foodId);
+  return food?.allergenLevel || null;
+}
+
+/** 获取某分类下的自定义食物列表 */
+export function getCustomFoodsByCategory(categoryId: string) {
+  return getRawCustomFoods().filter(f => f.categoryId === categoryId);
+}
+
+/** 判断食物是否为自定义食物 */
+export function isCustomFood(foodId: string): boolean {
+  return getRawCustomFoods().some(f => f.id === foodId);
+}
+
+
