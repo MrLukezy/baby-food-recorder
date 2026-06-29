@@ -7,6 +7,7 @@ import type { MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods, getFoodById, foodCategories } from '../../config/foodConfig';
 import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
+
 import { today } from '../../utils/date';
 
 interface RecordPanelProps {
@@ -33,6 +34,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   const [reactionHint, setReactionHint] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
   const [recordCategoryId, setRecordCategoryId] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
 
   // 判断是否为编辑模式：加载已有记录
@@ -328,16 +332,42 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
   // ============ 删除 ============
 
+  // 获取当前编辑的记录 ID（传入的 editRecordId 或自动匹配到的）
+  const getCurrentEditId = (): string | null => {
+    if (editRecordId) return editRecordId;
+    if (selectedFoodId && date) {
+      const existing = getRecords().find(
+        r => r.date === date && r.foodId === selectedFoodId
+      );
+      return existing?.id || null;
+    }
+    return null;
+  };
+
   const handleDelete = () => {
-    if (!editRecordId) return;
+    const currentId = getCurrentEditId();
+    if (!currentId) return;
+    setDeleteConfirmId(currentId);
+    setDeleteConfirmName(selectedFoodName);
+  };
 
-    const confirmed = window.confirm('确定要删除这条记录吗？');
-    if (!confirmed) return;
-
-    deleteRecord(editRecordId);
-    resetForm();
-    onSaved();
-    onClose();
+  // 确认删除记录
+  const handleConfirmDelete = () => {
+    if (!deleteConfirmId) return;
+    deleteRecord(deleteConfirmId);
+    // 如果正在编辑模式（isEditMode）或者删除的正是传入的编辑记录，关闭面板
+    const shouldClosePanel = isEditMode || deleteConfirmId === editRecordId;
+    setDeleteConfirmId(null);
+    setDeleteConfirmName('');
+    if (shouldClosePanel) {
+      resetForm();
+      onSaved();
+      onClose();
+    } else {
+      setShowHistory(false);
+      setTimeout(() => setShowHistory(true), 50);
+      onSaved();
+    }
   };
 
   const handleCancel = () => {
@@ -537,6 +567,66 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
             </div>
           </div>
 
+          {/* 该食物的历史记录 */}
+          {selectedFoodId && !isEditMode && (() => {
+            const historyRecs = getRecords().filter(r => r.foodId === selectedFoodId);
+            if (historyRecs.length === 0) return null;
+            return (
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="flex items-center gap-1 text-xs text-amber-500 mb-2"
+                >
+                  <span>📋 历史记录（{historyRecs.length}条）</span>
+                  <span className="text-amber-300">{showHistory ? '▲' : '▼'}</span>
+                </button>
+                {showHistory && (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {[...historyRecs].sort((a, b) => b.date.localeCompare(a.date)).map(rec => {
+                      const mealLabels: Record<string, string> = {
+                        breakfast: '早餐', lunch: '中餐', dinner: '晚餐', snack: '加餐'
+                      };
+                      const reactionLabels: Record<string, string> = {
+                        safe: '不过敏', observing: '观察中',
+                        suspected: '疑似过敏', allergic: '过敏'
+                      };
+                      const reactionColors: Record<string, string> = {
+                        safe: 'text-green-600', observing: 'text-amber-500',
+                        suspected: 'text-orange-500', allergic: 'text-red-500'
+                      };
+                      return (
+                        <div
+                          key={rec.id}
+                          className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-amber-100"
+                        >
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-gray-500">{rec.date}</span>
+                            <span className="text-gray-400">{mealLabels[rec.meal] || rec.meal}</span>
+                            <span className={reactionColors[rec.reaction] || 'text-gray-500'}>
+                              {reactionLabels[rec.reaction] || rec.reaction}
+                            </span>
+                            {rec.dayCount && (
+                              <span className="text-gray-400">Day{rec.dayCount.replace('day','')}</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setDeleteConfirmId(rec.id);
+                              setDeleteConfirmName(selectedFoodName);
+                            }}
+                            className="text-red-300 hover:text-red-500 text-xs px-1"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* 备注 */}
           <div className="mb-2">
             <label className="text-sm text-amber-800 font-medium mb-1 block">备注</label>
@@ -593,7 +683,58 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
           )}
         </div>
       </div>
+
+      <DeleteConfirmPortal
+        deleteConfirmId={deleteConfirmId}
+        deleteConfirmName={deleteConfirmName}
+        onCancel={() => { setDeleteConfirmId(null); setDeleteConfirmName(''); }}
+        onConfirm={handleConfirmDelete}
+      />
     </>
+  );
+};
+
+import ReactDOM from 'react-dom';
+
+/* 删除确认弹窗 - 使用 Portal 渲染到 body 层，避免被 transform 父容器影响 */
+const DeleteConfirmPortal: React.FC<{
+  deleteConfirmId: string | null;
+  deleteConfirmName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({ deleteConfirmId, deleteConfirmName, onCancel, onConfirm }) => {
+  if (!deleteConfirmId) return null;
+  return ReactDOM.createPortal(
+    <>
+      <div className="fixed inset-0 bg-black/50 z-[90]" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-[95] px-6">
+        <div className="bg-white rounded-2xl w-full max-w-xs shadow-2xl p-6">
+          <div className="text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">确认删除</h3>
+            <p className="text-sm text-gray-500 mb-1">
+              确定要删除 <span className="font-bold text-amber-700">{deleteConfirmName}</span> 的这条记录吗？
+            </p>
+            <p className="text-xs text-red-400 mb-5">删除后不可恢复</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
+            >
+              取消
+            </button>
+            <button
+              onClick={onConfirm}
+              className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"
+            >
+              确认删除
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
   );
 };
 

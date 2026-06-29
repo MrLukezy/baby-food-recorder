@@ -46,6 +46,32 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
       return parseInt(a.recommendedAge) - parseInt(b.recommendedAge);
     });
 
+  // 从记录中提取自定义食物（不在系统预设列表中的）
+  const customFoodIds = new Set(
+    allRecords
+      .filter(r => !allFoods.some(f => f.id === r.foodId))
+      .map(r => r.foodId)
+  );
+  const customFoods = Array.from(customFoodIds).map(foodId => {
+    const rec = allRecords.find(r => r.foodId === foodId)!;
+    const recordDays = new Set(allRecords.filter(r => r.foodId === foodId).map(r => r.date)).size;
+    const hasDay3Mark = allRecords.some(r => r.foodId === foodId && r.dayCount === 'day3' && r.reaction === 'safe');
+    const catInfo = rec.categoryId ? foodCategories.find(c => c.id === rec.categoryId) : null;
+    return {
+      id: foodId,
+      name: rec.foodName,
+      emoji: catInfo?.icon || '🍽️',
+      categoryId: rec.categoryId || 'custom',
+      categoryName: catInfo?.name || '自定义',
+      categoryIcon: catInfo?.icon || '🍽️',
+      allergenLevel: 'low' as const,
+      recommendedAge: '0',
+      eatCount: allRecords.filter(r => r.foodId === foodId).length,
+      allergenStatus: getFoodAllergenStatus(foodId),
+      daysTested: hasDay3Mark ? 3 : recordDays,
+    };
+  });
+
   // 已排敏的食物（使用新排敏状态）
   const testedFoods = allFoods
     .filter(f => appearedFoodIds.has(f.id))
@@ -63,6 +89,10 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
         daysTested,
       };
     })
+    .sort((a, b) => b.eatCount - a.eatCount);
+
+  // 合并自定义食物，按食用次数排序
+  const allTestedFoods = [...testedFoods, ...customFoods.filter(f => !searchQuery || f.name.includes(searchQuery))]
     .sort((a, b) => b.eatCount - a.eatCount);
 
   const handleFoodClick = (foodId: string, foodName: string) => {
@@ -116,7 +146,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                 : 'bg-white text-amber-700 border border-amber-200'
             }`}
           >
-            已食用 ({testedFoods.length})
+            已食用 ({allTestedFoods.length})
           </button>
           <button
             onClick={() => setListTab('untested')}
@@ -131,14 +161,14 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
         </div>
 
         {/* 已食用食物列表 */}
-        {listTab === 'tested' && testedFoods.length > 0 && (
+        {listTab === 'tested' && allTestedFoods.length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm">
             <h3 className="text-sm font-bold text-amber-800 mb-3">
               已食用食物
               <span className="text-xs text-amber-400 ml-2">第3天=排敏完成</span>
             </h3>
             <div className="space-y-2">
-              {testedFoods.map(food => {
+              {allTestedFoods.map(food => {
                 const reactionOpt = REACTION_OPTIONS.find(o => o.value === food.allergenStatus);
                 // 状态标签：3天完成 → 不过敏；< 3天 → 排敏中；过敏 → 过敏
                 const statusLabel = food.allergenStatus === 'safe'
@@ -192,7 +222,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
           </div>
         )}
 
-        {listTab === 'tested' && testedFoods.length === 0 && (
+        {listTab === 'tested' && allTestedFoods.length === 0 && (
           <div className="bg-white rounded-2xl p-6 shadow-sm text-center text-amber-400">
             <div className="text-3xl mb-2">🍽️</div>
             <p className="text-sm">还没有食用记录，添加后在这里查看</p>

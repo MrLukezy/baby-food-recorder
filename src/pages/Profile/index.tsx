@@ -2,9 +2,9 @@
 // 我的 Tab
 // ============================
 
-import React, { useState, useCallback, useRef, useMemo } from 'react';
-import type { BabyProfile } from '../../types';
-import { updateProfile, getStats, clearAllData, getFoodAllergenStatus, getPresetAllergens, getRecords } from '../../store';
+import React, { useState, useCallback, useRef } from 'react';
+import type { BabyProfile, FoodRecord } from '../../types';
+import { updateProfile, getStats, clearAllData, getFoodAllergenStatus, getPresetAllergens, getRecords, deleteRecord } from '../../store';
 import { getMonthAge } from '../../utils/date';
 import { exportToExcel, isWeChatBrowser } from '../../utils/export';
 import { getAllFoods, getFoodById } from '../../config/foodConfig';
@@ -24,14 +24,28 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const [showRecords, setShowRecords] = useState(false);
   // 当前浮层筛选的分类：null=全部, 'safe'/'observing'/'suspected'/'allergic'
   const [statFilter, setStatFilter] = useState<string | null>(null);
+  const [expandedFood, setExpandedFood] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{foodName: string; recordId: string} | null>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
+
+
+  const handleDeleteRecord = useCallback(() => {
+    if (deleteConfirm) {
+      deleteRecord(deleteConfirm.recordId);
+      setDeleteConfirm(null);
+      setExpandedFood(null);
+      setRefreshKey(n => n + 1);
+    }
+  }, [deleteConfirm]);
 
   const stats = getStats();
   const age = getMonthAge(profile.birthday);
   const inWeChat = isWeChatBrowser();
 
   // ============ 所有排敏记录数据 ============
-  const allRecordsData = useMemo(() => {
+  // 用 refreshKey 让删除后重新拉取数据
+  const [refreshKey, setRefreshKey] = useState(0);
+  const buildRecordsData = useCallback(() => {
     if (!showRecords) return null;
 
     const allRecs = getRecords();
@@ -42,6 +56,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       name: string; emoji: string; status: string;
       eatCount: number; days: number;
       categoryId: string; categoryName: string; categoryIcon: string;
+      records: FoodRecord[];
     }>();
 
     for (const r of allRecs) {
@@ -53,12 +68,14 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
           status: 'unknown',
           eatCount: 0,
           days: 0,
+          records: [],
           categoryId: foodInfo?.categoryId || r.categoryId || 'custom',
           categoryName: foodInfo?.categoryName || (r.categoryId ? (foodCategories.find(c=>c.id===r.categoryId)?.name || '自定义') : '自定义'),
           categoryIcon: foodInfo?.categoryIcon || (r.categoryId ? (foodCategories.find(c=>c.id===r.categoryId)?.icon || '🍽️') : '🍽️'),
         });
       }
       foodMap.get(r.foodId)!.eatCount++;
+      foodMap.get(r.foodId)!.records.push(r);
     }
 
     for (const id of presets) {
@@ -67,7 +84,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
         if (info) {
           foodMap.set(id, {
             name: info.name, emoji: info.emoji,
-            status: 'safe', eatCount: 0, days: 0,
+            status: 'safe', eatCount: 0, days: 0, records: [],
             categoryId: info.categoryId,
             categoryName: info.categoryName,
             categoryIcon: info.categoryIcon || '🍽️',
@@ -81,15 +98,15 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       const days = new Set(
         allRecs.filter(r => r.foodId === foodId).map(r => r.date)
       ).size;
-      // 如果手动标记了 day3 排敏完成但只有 1 条记录，显示为 3 天
       const hasDay3Mark = allRecs.some(r => r.foodId === foodId && r.dayCount === 'day3' && r.reaction === 'safe');
       item.status = status;
-      // 预设食物（无记录）显示为 3 天（排敏完成）
       item.days = presets.includes(foodId) && days === 0 ? 3 : (hasDay3Mark ? 3 : days);
     }
 
     return { foods: Array.from(foodMap.values()), total: foodMap.size };
-  }, [showRecords]);
+  }, [showRecords, refreshKey]);
+
+  const allRecordsData = buildRecordsData();
 
   // ============ 回调函数 ============
 
@@ -433,22 +450,81 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                                 {catFoods
                                   .sort((a, b) => b.days - a.days || b.eatCount - a.eatCount)
                                   .map((food, i) => (
-                                    <div
-                                      key={i}
-                                      className="flex items-center justify-between bg-amber-50/70 rounded-lg px-3 py-2"
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm">{food.emoji}</span>
-                                        <span className="text-sm font-medium text-amber-900">{food.name}</span>
+                                    <div key={i}>
+                                      {/* 食物条目 — 可点击展开 */}
+                                      <div
+                                        onClick={() => {
+                                          if (food.eatCount === 0) return;
+                                          setExpandedFood(expandedFood === food.name ? null : food.name);
+                                        }}
+                                        className={`flex items-center justify-between rounded-lg px-3 py-2 cursor-pointer transition-colors ${
+                                          expandedFood === food.name
+                                            ? 'bg-amber-100'
+                                            : 'bg-amber-50/70 hover:bg-amber-50'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm">{food.emoji}</span>
+                                          <span className="text-sm font-medium text-amber-900">{food.name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          {food.days > 0 && (
+                                            <span className="text-xs text-amber-400">{food.days}天</span>
+                                          )}
+                                          {food.eatCount > 0 && (
+                                            <span className="text-xs text-amber-400">×{food.eatCount}</span>
+                                          )}
+                                          {food.eatCount > 0 && (
+                                            <span className="text-xs text-amber-300 ml-1">{expandedFood === food.name ? '▲' : '▼'}</span>
+                                          )}
+                                        </div>
                                       </div>
-                                      <div className="flex items-center gap-2">
-                                        {food.days > 0 && (
-                                          <span className="text-xs text-amber-400">{food.days}天</span>
-                                        )}
-                                        {food.eatCount > 0 && (
-                                          <span className="text-xs text-amber-400">×{food.eatCount}</span>
-                                        )}
-                                      </div>
+
+                                      {/* 展开后的记录列表 */}
+                                      {expandedFood === food.name && food.records.length > 0 && (
+                                        <div className="ml-2 mt-1 mb-2 space-y-1">
+                                          {[...food.records].sort((a, b) => b.date.localeCompare(a.date)).map((rec) => {
+                                            const mealLabels: Record<string, string> = {
+                                              breakfast: '早餐', lunch: '中餐', dinner: '晚餐', snack: '加餐'
+                                            };
+                                            const reactionLabels: Record<string, string> = {
+                                              safe: '不过敏', observing: '观察中',
+                                              suspected: '疑似过敏', allergic: '过敏'
+                                            };
+                                            const reactionColors: Record<string, string> = {
+                                              safe: 'text-green-600', observing: 'text-amber-500',
+                                              suspected: 'text-orange-500', allergic: 'text-red-500'
+                                            };
+                                            return (
+                                              <div
+                                                key={rec.id}
+                                                className="flex items-center justify-between bg-white rounded-md px-3 py-1.5 border border-amber-100"
+                                              >
+                                                <div className="flex items-center gap-2 text-xs">
+                                                  <span className="text-gray-500">{rec.date}</span>
+                                                  <span className="text-gray-400">{mealLabels[rec.meal] || rec.meal}</span>
+                                                  <span className={reactionColors[rec.reaction] || 'text-gray-500'}>
+                                                    {reactionLabels[rec.reaction] || rec.reaction}
+                                                  </span>
+                                                  {rec.dayCount && (
+                                                    <span className="text-gray-400">Day{rec.dayCount.replace('day','')}</span>
+                                                  )}
+                                                  {rec.note && <span className="text-gray-400 max-w-[80px] truncate">{rec.note}</span>}
+                                                </div>
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeleteConfirm({ foodName: food.name, recordId: rec.id });
+                                                  }}
+                                                  className="text-red-300 hover:text-red-500 text-sm px-1"
+                                                >
+                                                  🗑
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                               </div>
@@ -467,6 +543,39 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                   <p className="text-sm">暂无排敏记录</p>
                 </div>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ============ 删除确认弹窗 ============ */}
+      {deleteConfirm && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-[70]" onClick={() => setDeleteConfirm(null)} />
+          <div className="fixed inset-0 flex items-center justify-center z-[75] px-6">
+            <div className="bg-white rounded-2xl w-full max-w-xs shadow-2xl p-6 animate-pop-in">
+              <div className="text-center">
+                <div className="text-4xl mb-3">⚠️</div>
+                <h3 className="text-lg font-bold text-gray-800 mb-2">确认删除</h3>
+                <p className="text-sm text-gray-500 mb-1">
+                  确定要删除 <span className="font-bold text-amber-700">{deleteConfirm.foodName}</span> 的这条记录吗？
+                </p>
+                <p className="text-xs text-red-400 mb-5">删除后不可恢复</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleDeleteRecord}
+                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"
+                >
+                  确认删除
+                </button>
+              </div>
             </div>
           </div>
         </>
