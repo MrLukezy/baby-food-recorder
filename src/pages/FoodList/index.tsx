@@ -4,7 +4,7 @@
 
 import { useState, useCallback } from 'react';
 import { REACTION_OPTIONS } from '../../types';
-import { getRecords, getPresetAllergens, getFoodAllergenStatus, getFoodEatCount } from '../../store';
+import { getRecords, getPresetAllergens, getFoodAllergenStatus, getFoodEatCount, savePresetAllergens, saveRecords } from '../../store';
 import { foodCategories, getAllFoods } from '../../config/foodConfig';
 import RecordPanel from '../../components/RecordPanel';
 import { today } from '../../utils/date';
@@ -20,6 +20,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const [prefillFood, setPrefillFood] = useState<{ id: string; name: string } | null>(null);
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [listTab, setListTab] = useState<'tested' | 'untested'>('tested');
+  const [removeConfirm, setRemoveConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const forceRefresh = useCallback(() => setRefresh(n => n + 1), []);
 
@@ -182,15 +183,17 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                         : '';
 
                 return (
-                  <button
+                  <div
                     key={food.id}
-                    onClick={() => handleFoodClick(food.id, food.name)}
-                    className="w-full flex items-center justify-between bg-amber-50 rounded-xl px-3 py-3 hover:bg-amber-100 transition-colors"
+                    className="flex items-center justify-between bg-amber-50 rounded-xl px-3 py-3"
                   >
-                    <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleFoodClick(food.id, food.name)}
+                      className="flex-1 flex items-center gap-2 text-left"
+                    >
                       <span className="text-lg">{food.emoji}</span>
                       <span className="font-medium text-amber-900">{food.name}</span>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-2">
                       {/* 排敏天数进度 */}
                       {food.allergenStatus === 'observing' && (
@@ -214,8 +217,18 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                         </span>
                       )}
                       <span className="text-sm text-amber-400">×{food.eatCount}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRemoveConfirm({ id: food.id, name: food.name });
+                        }}
+                        className="text-red-300 hover:text-red-500 text-sm px-1"
+                        title="移除"
+                      >
+                        ✕
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -280,6 +293,52 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
         onClose={() => { setShowPanel(false); setPrefillFood(null); setEditRecordId(null); }}
         onSaved={forceRefresh}
       />
+
+      {/* 移除确认弹窗 */}
+      {removeConfirm && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-[55]" onClick={() => setRemoveConfirm(null)} />
+          <div className="fixed inset-0 flex items-center justify-center z-[60] px-6">
+            <div className="bg-white rounded-2xl w-full max-w-xs shadow-2xl p-6">
+              <div className="text-center">
+                <div className="text-4xl mb-3">🗑️</div>
+                <h3 className="text-lg font-bold text-gray-800 mb-2">确认移除</h3>
+                <p className="text-sm text-gray-500 mb-5">
+                  确定要将 <span className="font-bold text-amber-700">{removeConfirm.name}</span> 从已排敏列表中移除吗？
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setRemoveConfirm(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    if (!removeConfirm) return;
+                    const { id } = removeConfirm;
+                    // 删除所有相关记录
+                    const records = getRecords();
+                    const remaining = records.filter(r => r.foodId !== id);
+                    saveRecords(remaining);
+                    // 从预设列表中移除
+                    const presets = getPresetAllergens();
+                    if (presets.includes(id)) {
+                      savePresetAllergens(presets.filter(p => p !== id));
+                    }
+                    setRemoveConfirm(null);
+                    forceRefresh();
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"
+                >
+                  确认移除
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
