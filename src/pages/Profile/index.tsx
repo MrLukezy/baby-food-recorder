@@ -5,10 +5,22 @@
 import React, { useState, useCallback, useRef } from 'react';
 import type { BabyProfile, FoodRecord } from '../../types';
 import { updateProfile, getStats, clearAllData, getFoodAllergenStatus, getPresetAllergens, getRecords, deleteRecord } from '../../store';
+import { fetchServerLogs } from '../../store/clientLog';
 import { getMonthAge } from '../../utils/date';
 import { exportToExcel, isWeChatBrowser } from '../../utils/export';
 import { getAllFoods, getFoodById } from '../../config/foodConfig';
 import { getFoodEmoji, foodCategories } from '../../config/foodConfig';
+
+type LogType = 'error' | 'app' | 'access';
+type LogEntry = Awaited<ReturnType<typeof fetchServerLogs>>['entries'][number];
+
+function formatLogTime(iso?: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 interface ProfileProps {
   profile: BabyProfile;
@@ -27,6 +39,11 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const [expandedFood, setExpandedFood] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{foodName: string; recordId: string} | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logType, setLogType] = useState<LogType>('error');
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
 
 
@@ -41,6 +58,31 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       // 错误已由全局提示展示
     }
   }, [deleteConfirm]);
+
+  const loadLogs = useCallback(async (type: LogType = logType) => {
+    setLogLoading(true);
+    setLogError(null);
+    try {
+      const data = await fetchServerLogs(type, 100);
+      setLogEntries(data.entries || []);
+    } catch (e) {
+      setLogEntries([]);
+      setLogError(e instanceof Error ? e.message : '加载日志失败');
+    } finally {
+      setLogLoading(false);
+    }
+  }, [logType]);
+
+  const openLogs = useCallback(() => {
+    setShowLogs(true);
+    setLogType('error');
+    void loadLogs('error');
+  }, [loadLogs]);
+
+  const switchLogType = useCallback((type: LogType) => {
+    setLogType(type);
+    void loadLogs(type);
+  }, [loadLogs]);
 
   const stats = getStats();
   const age = getMonthAge(profile.birthday);
@@ -362,6 +404,17 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
           </button>
 
           <button
+            onClick={openLogs}
+            className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:bg-amber-50 transition-colors"
+          >
+            <span className="text-2xl">📋</span>
+            <div className="text-left">
+              <p className="font-medium text-amber-900">查看历史报错</p>
+              <p className="text-xs text-amber-500">服务端与前端错误日志，便于排查问题</p>
+            </div>
+          </button>
+
+          <button
             onClick={handleClearData}
             className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:bg-red-50 transition-colors"
           >
@@ -566,6 +619,103 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                   <p className="text-sm">暂无排敏记录</p>
                 </div>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ============ 历史报错浮层 ============ */}
+      {showLogs && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowLogs(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
+              <h2 className="text-lg font-bold text-amber-900">
+                历史报错
+                <span className="text-xs text-amber-400 ml-2">{logEntries.length} 条</span>
+              </h2>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => void loadLogs(logType)}
+                  className="text-xs text-orange-500 font-medium"
+                  disabled={logLoading}
+                >
+                  刷新
+                </button>
+                <button onClick={() => setShowLogs(false)} className="text-gray-400 text-2xl">✕</button>
+              </div>
+            </div>
+
+            <div className="px-5 py-2 flex gap-2 flex-shrink-0 border-b border-amber-50">
+              {([
+                { key: 'error' as const, label: '报错' },
+                { key: 'app' as const, label: '应用' },
+                { key: 'access' as const, label: '访问' },
+              ]).map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => switchLogType(opt.key)}
+                  className={`text-xs px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
+                    logType === opt.key
+                      ? 'bg-orange-400 text-white'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+              {logLoading && (
+                <p className="text-center text-sm text-amber-400 py-8">加载中…</p>
+              )}
+              {!logLoading && logError && (
+                <p className="text-center text-sm text-red-400 py-8">{logError}</p>
+              )}
+              {!logLoading && !logError && logEntries.length === 0 && (
+                <div className="text-center py-8 text-amber-400">
+                  <div className="text-3xl mb-2">✨</div>
+                  <p className="text-sm">暂无日志</p>
+                </div>
+              )}
+              {!logLoading && !logError && logEntries.map((entry, i) => (
+                <div
+                  key={`${entry.time || ''}-${i}`}
+                  className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wide ${
+                      entry.level === 'error' ? 'text-red-500'
+                        : entry.level === 'warn' ? 'text-amber-600'
+                          : 'text-amber-500'
+                    }`}>
+                      {entry.level || 'log'}
+                      {entry.source === 'client' ? ' · 前端' : ''}
+                    </span>
+                    <span className="text-[10px] text-amber-400 tabular-nums">
+                      {formatLogTime(entry.time as string | undefined)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-amber-900 break-words">
+                    {String(entry.message || entry.error || '—')}
+                  </p>
+                  {(entry.path || entry.status != null || entry.ms != null) && (
+                    <p className="text-[11px] text-amber-500 mt-1 break-all">
+                      {[
+                        entry.path ? `path: ${entry.path}` : null,
+                        entry.status != null ? `status: ${entry.status}` : null,
+                        entry.ms != null ? `${entry.ms}ms` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {typeof entry.stack === 'string' && entry.stack && (
+                    <pre className="mt-1 text-[10px] text-amber-600/80 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                      {entry.stack}
+                    </pre>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </>

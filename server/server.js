@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const foodDb = require('./food-database');
+const logger = require('./logger');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const PORT = 3003;
@@ -45,15 +46,15 @@ function readJson(filePath, defaultVal) {
       return readJsonRaw(filePath);
     }
   } catch (e) {
-    console.error(`读取失败 ${filePath}:`, e.message);
+    logger.error('读取 JSON 失败', { filePath, error: e.message });
     const bakPath = filePath + '.bak';
     try {
       if (fs.existsSync(bakPath)) {
-        console.warn(`尝试从备份恢复: ${bakPath}`);
+        logger.warn('尝试从备份恢复', { bakPath });
         return readJsonRaw(bakPath);
       }
     } catch (e2) {
-      console.error(`备份读取失败 ${bakPath}:`, e2.message);
+      logger.error('备份读取失败', { bakPath, error: e2.message });
     }
   }
   return defaultVal;
@@ -69,7 +70,7 @@ function writeJsonSync(filePath, data) {
     try {
       fs.copyFileSync(filePath, filePath + '.bak');
     } catch (e) {
-      console.warn(`备份失败 ${filePath}:`, e.message);
+      logger.warn('备份失败', { filePath, error: e.message });
     }
   }
 
@@ -145,6 +146,43 @@ const routes = {
       service: 'baby-food-recorder-api',
       time: new Date().toISOString(),
     });
+  },
+
+  // 查询历史日志（最新在前）
+  'GET /api/logs': (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const type = url.searchParams.get('type') || 'error'; // error | access | app
+    const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+    const fileMap = {
+      error: 'error.log',
+      access: 'access.log',
+      app: 'app.log',
+    };
+    const fileName = fileMap[type] || 'error.log';
+    const entries = logger.readTail(fileName, limit);
+    sendJson(res, 200, {
+      ok: true,
+      type,
+      file: fileName,
+      count: entries.length,
+      files: logger.listFiles(),
+      entries,
+    });
+  },
+
+  // 前端上报客户端错误
+  'POST /api/client-logs': async (req, res) => {
+    const body = await parseBody(req);
+    const level = body.level === 'warn' ? 'warn' : 'error';
+    const entry = logger[level](body.message || 'client error', {
+      source: 'client',
+      path: body.path || '',
+      status: body.status ?? null,
+      stack: body.stack ? String(body.stack).slice(0, 2000) : undefined,
+      userAgent: (req.headers['user-agent'] || '').slice(0, 300),
+      extra: body.extra && typeof body.extra === 'object' ? body.extra : undefined,
+    });
+    sendJson(res, 200, { ok: true, id: entry.time });
   },
 
   'GET /api/profile': (req, res) => {
@@ -314,6 +352,7 @@ const routes = {
   'POST /api/deepseek/chat': async (req, res) => {
     const body = await parseBody(req);
     if (!DEEPSEEK_KEY) {
+      logger.error('DeepSeek API key 未配置');
       sendJson(res, 500, { error: 'DeepSeek API key not configured' });
       return;
     }
@@ -343,6 +382,12 @@ const routes = {
         proxyRes.on('data', (chunk) => { rawData += chunk; });
         proxyRes.on('end', () => {
           const origin = req.headers.origin || '*';
+          if ((proxyRes.statusCode || 200) >= 400) {
+            logger.error('DeepSeek 代理返回错误', {
+              status: proxyRes.statusCode,
+              body: String(rawData).slice(0, 500),
+            });
+          }
           if (!res.writableEnded) {
             res.writeHead(proxyRes.statusCode || 200, {
               'Access-Control-Allow-Origin': origin,
@@ -355,6 +400,7 @@ const routes = {
       });
 
       proxyReq.on('error', (e) => {
+        logger.error('DeepSeek 代理失败', { error: e.message });
         sendJson(res, 500, { error: 'DeepSeek proxy error: ' + e.message });
         resolve();
       });
@@ -366,6 +412,8 @@ const routes = {
 };
 
 const server = http.createServer((req, res) => {
+  const started = Date.now();
+
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin || '*';
     res.writeHead(204, corsHeaders(origin));
@@ -377,6 +425,31 @@ const server = http.createServer((req, res) => {
   const routeKey = `${req.method} ${url.pathname}`;
   const handler = routes[routeKey];
 
+  const originalEnd = res.end.bind(res);
+  res.end = function patchedEnd(...args) {
+    if (!res.__logged) {
+      res.__logged = true;
+      const ms = Date.now() - started;
+      const status = res.statusCode || 0;
+      const entry = {
+        method: req.method,
+        path: url.pathname,
+        status,
+        ms,
+        ip: req.headers['x-real-ip'] || req.socket.remoteAddress || '',
+      };
+      if (status >= 500) {
+        logger.error('request failed', entry);
+      } else if (status >= 400) {
+        logger.warn('request client error', entry);
+        logger.access(entry);
+      } else if (url.pathname !== '/api/health' && url.pathname !== '/api/logs') {
+        logger.access(entry);
+      }
+    }
+    return originalEnd(...args);
+  };
+
   if (!handler) {
     sendJson(res, 404, { error: 'Not found' });
     return;
@@ -386,7 +459,12 @@ const server = http.createServer((req, res) => {
   Promise.resolve()
     .then(() => handler(req, res))
     .catch((err) => {
-      console.error('API error:', routeKey, err);
+      logger.error('API 未捕获异常', {
+        route: routeKey,
+        error: err?.message || String(err),
+        stack: err?.stack ? String(err.stack).slice(0, 2000) : undefined,
+        statusCode: err?.statusCode || 500,
+      });
       const status = err?.statusCode || 500;
       const message = err?.statusCode === 400 ? (err.message || 'Bad Request') : 'Internal Server Error';
       sendJson(res, status, { error: message });
@@ -394,7 +472,8 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Baby Food Recorder API running on http://127.0.0.1:${PORT}`);
-  console.log('Endpoints:');
-  Object.keys(routes).forEach(k => console.log(`  ${k}`));
+  logger.info(`Baby Food Recorder API running on http://127.0.0.1:${PORT}`, {
+    logDir: logger.LOG_DIR,
+  });
+  Object.keys(routes).forEach(k => logger.info(`route ${k}`));
 });

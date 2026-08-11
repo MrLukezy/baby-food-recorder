@@ -2,6 +2,8 @@
 // 服务端 API 请求（无本地缓存）
 // ============================
 
+import { reportClientError } from './clientLog';
+
 export const BASE_URL = import.meta.env.DEV
   ? 'http://127.0.0.1:3003/api'
   : '/babyfoodrecorder/api';
@@ -15,6 +17,15 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
   }
+}
+
+function shouldReport(path: string): boolean {
+  return !path.startsWith('/client-logs') && !path.startsWith('/logs');
+}
+
+function reportApiFailure(message: string, path: string, status?: number) {
+  if (!shouldReport(path)) return;
+  reportClientError(message, { path, status });
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -54,14 +65,23 @@ export async function apiGet<T>(path: string): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await rawFetch(path);
-      if (!res.ok) throw new ApiError(await parseError(res), res.status);
+      if (!res.ok) {
+        const msg = await parseError(res);
+        reportApiFailure(msg, path, res.status);
+        throw new ApiError(msg, res.status);
+      }
       try {
         return await res.json() as T;
       } catch {
-        throw new ApiError('服务器返回了无效数据', res.status);
+        const msg = '服务器返回了无效数据';
+        reportApiFailure(msg, path, res.status);
+        throw new ApiError(msg, res.status);
       }
     } catch (e) {
       lastError = e;
+      if (e instanceof ApiError && e.status === 0) {
+        reportApiFailure(e.message, path, 0);
+      }
       // 仅网络类错误重试一次；业务 4xx/5xx 不重试
       if (!(e instanceof ApiError) || e.status !== 0 || attempt === 1) {
         throw e;
@@ -72,20 +92,35 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T = { ok?: boolean }>(path: string, body: unknown): Promise<T> {
-  const res = await rawFetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new ApiError(await parseError(res), res.status);
-
-  const text = await res.text();
-  if (!text) {
-    throw new ApiError('服务器未返回确认结果', res.status);
-  }
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new ApiError('服务器返回了无效数据', res.status);
+    const res = await rawFetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const msg = await parseError(res);
+      reportApiFailure(msg, path, res.status);
+      throw new ApiError(msg, res.status);
+    }
+
+    const text = await res.text();
+    if (!text) {
+      const msg = '服务器未返回确认结果';
+      reportApiFailure(msg, path, res.status);
+      throw new ApiError(msg, res.status);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      const msg = '服务器返回了无效数据';
+      reportApiFailure(msg, path, res.status);
+      throw new ApiError(msg, res.status);
+    }
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 0) {
+      reportApiFailure(e.message, path, 0);
+    }
+    throw e;
   }
 }
