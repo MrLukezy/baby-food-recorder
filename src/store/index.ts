@@ -5,7 +5,7 @@
 
 import type { BabyProfile, FoodRecord, ReactionType } from '../types';
 import { apiGet, apiPost } from './api';
-import { withFeedback } from './feedback';
+import { withFeedback, showError } from './feedback';
 
 export interface CustomFood {
   id: string;
@@ -34,11 +34,24 @@ const memory: Memory = {
 type ChangeListener = () => void;
 const changeListeners = new Set<ChangeListener>();
 
+/** 各资源写队列，避免并发 replace 互相覆盖 */
+const writeChains: Record<string, Promise<void>> = {
+  profile: Promise.resolve(),
+  records: Promise.resolve(),
+  presets: Promise.resolve(),
+  customFoods: Promise.resolve(),
+};
+
+function enqueueResourceWrite(key: keyof typeof writeChains, fn: () => Promise<void>): Promise<void> {
+  const next = writeChains[key].catch(() => undefined).then(fn);
+  writeChains[key] = next.catch(() => undefined);
+  return next;
+}
+
 function emitChange() {
   changeListeners.forEach(l => l());
 }
 
-/** 订阅内存镜像变化（写成功后通知 UI 刷新） */
 export function subscribeStore(listener: ChangeListener): () => void {
   changeListeners.add(listener);
   return () => { changeListeners.delete(listener); };
@@ -60,7 +73,7 @@ export async function bootstrapFromServer(): Promise<void> {
       apiGet<BabyProfile | Record<string, never>>('/profile'),
       apiGet<FoodRecord[]>('/records'),
       apiGet<string[]>('/presets'),
-      apiGet<CustomFood[]>('/custom-foods').catch(() => [] as CustomFood[]),
+      apiGet<CustomFood[]>('/custom-foods'),
     ]);
 
     memory.profile = profile && (profile as BabyProfile).name
@@ -81,11 +94,13 @@ export function getProfile(): BabyProfile | null {
 }
 
 export async function saveProfile(profile: BabyProfile): Promise<void> {
-  return withFeedback('保存档案中...', async () => {
-    await apiPost('/profile', profile);
-    memory.profile = profile;
-    emitChange();
-  });
+  return withFeedback('保存档案中...', () =>
+    enqueueResourceWrite('profile', async () => {
+      await apiPost('/profile', profile);
+      memory.profile = profile;
+      emitChange();
+    })
+  );
 }
 
 export async function updateProfile(updates: Partial<BabyProfile>): Promise<BabyProfile | null> {
@@ -103,11 +118,13 @@ export function getRecords(): FoodRecord[] {
 }
 
 export async function saveRecords(records: FoodRecord[]): Promise<void> {
-  return withFeedback('保存记录中...', async () => {
-    await apiPost('/records', { action: 'replace', records });
-    memory.records = records;
-    emitChange();
-  });
+  return withFeedback('保存记录中...', () =>
+    enqueueResourceWrite('records', async () => {
+      await apiPost('/records', { action: 'replace', records });
+      memory.records = records;
+      emitChange();
+    })
+  );
 }
 
 export async function addRecord(record: FoodRecord): Promise<void> {
@@ -140,11 +157,13 @@ export function getPresetAllergens(): string[] {
 }
 
 export async function savePresetAllergens(foodIds: string[]): Promise<void> {
-  return withFeedback('保存预设中...', async () => {
-    await apiPost('/presets', foodIds);
-    memory.presets = foodIds;
-    emitChange();
-  });
+  return withFeedback('保存预设中...', () =>
+    enqueueResourceWrite('presets', async () => {
+      await apiPost('/presets', foodIds);
+      memory.presets = foodIds;
+      emitChange();
+    })
+  );
 }
 
 // ============ 自定义食材 ============
@@ -154,11 +173,13 @@ export function getCustomFoods(): CustomFood[] {
 }
 
 async function persistCustomFoods(foods: CustomFood[]): Promise<void> {
-  return withFeedback('保存食材中...', async () => {
-    await apiPost('/custom-foods', foods);
-    memory.customFoods = foods;
-    emitChange();
-  });
+  return withFeedback('保存食材中...', () =>
+    enqueueResourceWrite('customFoods', async () => {
+      await apiPost('/custom-foods', foods);
+      memory.customFoods = foods;
+      emitChange();
+    })
+  );
 }
 
 export async function addCustomFood(
@@ -169,7 +190,7 @@ export async function addCustomFood(
   const foods = [
     ...memory.customFoods,
     {
-      id: 'custom_' + Date.now(),
+      id: 'custom_' + generateId(),
       name: name.trim(),
       categoryId,
       allergenLevel,
@@ -333,16 +354,54 @@ export function getFoodEatCount(foodId: string, records?: FoodRecord[]): number 
 
 export async function clearAllData(): Promise<void> {
   return withFeedback('清除数据中...', async () => {
-    await Promise.all([
-      apiPost('/records', { action: 'replace', records: [] }),
-      apiPost('/profile', {}),
-      apiPost('/presets', []),
-      apiPost('/custom-foods', []).catch(() => undefined),
-    ]);
-    memory.profile = null;
-    memory.records = [];
-    memory.presets = [];
-    memory.customFoods = [];
+    const steps: Array<{ name: string; run: () => Promise<void> }> = [
+      {
+        name: 'records',
+        run: () => enqueueResourceWrite('records', async () => {
+          await apiPost('/records', { action: 'replace', records: [] });
+          memory.records = [];
+        }),
+      },
+      {
+        name: 'profile',
+        run: () => enqueueResourceWrite('profile', async () => {
+          await apiPost('/profile', {});
+          memory.profile = null;
+        }),
+      },
+      {
+        name: 'presets',
+        run: () => enqueueResourceWrite('presets', async () => {
+          await apiPost('/presets', []);
+          memory.presets = [];
+        }),
+      },
+      {
+        name: 'customFoods',
+        run: () => enqueueResourceWrite('customFoods', async () => {
+          await apiPost('/custom-foods', []);
+          memory.customFoods = [];
+        }),
+      },
+    ];
+
+    const failed: string[] = [];
+    for (const step of steps) {
+      try {
+        await step.run();
+      } catch {
+        failed.push(step.name);
+      }
+    }
+
     emitChange();
+
+    if (failed.length > 0) {
+      try {
+        await bootstrapFromServer();
+      } catch { /* ignore secondary */ }
+      showError(`部分数据清除失败（${failed.join(', ')}），已尝试重新同步`);
+      throw new Error('部分清除失败');
+    }
   });
 }

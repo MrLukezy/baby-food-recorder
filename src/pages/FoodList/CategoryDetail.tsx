@@ -4,6 +4,7 @@
 
 import React, { useState } from 'react';
 import { foodCategories, addCustomFood, deleteCustomFood, updateCustomFood, getCustomFoodsByCategory, isCustomFood } from '../../config/foodConfig';
+import { hasRelatedSafeFood } from '../../config/relatedFoodGroups';
 import { getFoodAllergenStatus, getFoodEatCount, getRecords } from '../../store';
 import { REACTION_OPTIONS } from '../../types';
 
@@ -115,25 +116,35 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                       : '';
 
               const custom = isCustomFood(food.id);
+              const relatedSafe = !food.reaction ? hasRelatedSafeFood(food.id) : null;
               return (
                 <div
                   key={food.id}
                   className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <span className="text-base">{food.emoji}</span>
-                    <span className="font-medium text-amber-900">{food.name}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      food.allergenLevel === 'high' ? 'bg-red-50 text-red-500' :
-                      food.allergenLevel === 'medium' ? 'bg-yellow-50 text-yellow-500' :
-                      food.allergenLevel === 'avoid' ? 'bg-gray-800 text-white' :
-                      'bg-green-50 text-green-500'
-                    }`}>
-                      {food.allergenLevel === 'low' ? '低敏' :
-                       food.allergenLevel === 'medium' ? '中敏' :
-                       food.allergenLevel === 'avoid' ? '❌不能吃' :
-                       '高敏'}
-                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-amber-900">{food.name}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          food.allergenLevel === 'high' ? 'bg-red-50 text-red-500' :
+                          food.allergenLevel === 'medium' ? 'bg-yellow-50 text-yellow-500' :
+                          food.allergenLevel === 'avoid' ? 'bg-gray-800 text-white' :
+                          'bg-green-50 text-green-500'
+                        }`}>
+                          {food.allergenLevel === 'low' ? '低敏' :
+                           food.allergenLevel === 'medium' ? '中敏' :
+                           food.allergenLevel === 'avoid' ? '❌不能吃' :
+                           '高敏'}
+                        </span>
+                      </div>
+                      {relatedSafe && (
+                        <p className="text-[11px] text-sky-600 mt-0.5">
+                          同类已排敏：{relatedSafe.foodName}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {/* 排敏天数进度条 */}

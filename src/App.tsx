@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import type { BabyProfile } from './types';
 import { getProfile, bootstrapFromServer } from './store';
 import { bootstrapChatFromServer } from './utils/chatStore';
+import { showError } from './store/feedback';
 import CreateBaby from './pages/Onboarding/CreateBaby';
 import SelectFoods from './pages/Onboarding/SelectFoods';
 import Home from './pages/Home';
@@ -53,35 +54,55 @@ function pageToHash(page: Page): string {
   return '#home';
 }
 
+function enterAfterBoot(
+  setProfile: (p: BabyProfile | null) => void,
+  setPage: (p: Page) => void,
+) {
+  const existing = getProfile();
+  if (existing) {
+    setProfile(existing);
+    const hashPage = parseHash(window.location.hash);
+    if (hashPage) {
+      setPage(hashPage);
+    } else {
+      setPage({ type: 'tab', tab: 'home' });
+      window.location.hash = '#home';
+    }
+  } else {
+    setPage({ type: 'onboarding_create' });
+  }
+}
+
 function App() {
   const [profile, setProfile] = useState<BabyProfile | null>(null);
   const [page, setPage] = useState<Page>({ type: 'boot' });
+  const [chatAvailable, setChatAvailable] = useState(true);
   const currentPageRef = useRef<Page>(page);
+  const bootGenRef = useRef(0);
 
   useEffect(() => {
     currentPageRef.current = page;
   }, [page]);
 
   useEffect(() => {
+    const gen = ++bootGenRef.current;
     const init = async () => {
       try {
         await bootstrapFromServer();
-        await bootstrapChatFromServer();
+        if (bootGenRef.current !== gen) return;
 
-        const existing = getProfile();
-        if (existing) {
-          setProfile(existing);
-          const hashPage = parseHash(window.location.hash);
-          if (hashPage) {
-            setPage(hashPage);
-          } else {
-            setPage({ type: 'tab', tab: 'home' });
-            window.location.hash = '#home';
-          }
-        } else {
-          setPage({ type: 'onboarding_create' });
+        try {
+          await bootstrapChatFromServer();
+          if (bootGenRef.current !== gen) return;
+          setChatAvailable(true);
+        } catch (chatErr: any) {
+          setChatAvailable(false);
+          showError(chatErr?.message || '对话数据加载失败，助手暂不可用');
         }
+
+        enterAfterBoot(setProfile, setPage);
       } catch (e: any) {
+        if (bootGenRef.current !== gen) return;
         setPage({
           type: 'boot_error',
           message: e?.message || '无法从服务器加载数据',
@@ -152,24 +173,31 @@ function App() {
   }, []);
 
   const handleOpenChat = useCallback(() => {
+    if (!chatAvailable) {
+      showError('对话数据未加载成功，请刷新页面后重试');
+      return;
+    }
     setPage({ type: 'chat' });
-  }, []);
+  }, [chatAvailable]);
 
   const handleRetryBoot = useCallback(() => {
+    const gen = ++bootGenRef.current;
     setPage({ type: 'boot' });
     (async () => {
       try {
         await bootstrapFromServer();
-        await bootstrapChatFromServer();
-        const existing = getProfile();
-        if (existing) {
-          setProfile(existing);
-          setPage({ type: 'tab', tab: 'home' });
-          window.location.hash = '#home';
-        } else {
-          setPage({ type: 'onboarding_create' });
+        if (bootGenRef.current !== gen) return;
+        try {
+          await bootstrapChatFromServer();
+          if (bootGenRef.current !== gen) return;
+          setChatAvailable(true);
+        } catch (chatErr: any) {
+          setChatAvailable(false);
+          showError(chatErr?.message || '对话数据加载失败，助手暂不可用');
         }
+        enterAfterBoot(setProfile, setPage);
       } catch (e: any) {
+        if (bootGenRef.current !== gen) return;
         setPage({
           type: 'boot_error',
           message: e?.message || '无法从服务器加载数据',

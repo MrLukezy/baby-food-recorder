@@ -30,6 +30,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
   const abortRef = useRef<AbortController | null>(null);
   // 用 ref 追踪正在流式输出的会话 ID，防止切换后把文本显示到别的会话
   const streamingConvIdRef = useRef<string | null>(null);
+  const sendingRef = useRef(false);
 
   const aiInfo = getAIInfo();
 
@@ -125,7 +126,8 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text || isStreaming || sendingRef.current) return;
+    sendingRef.current = true;
 
     // 如果没有当前会话，创建一个
     let conv = activeConv;
@@ -139,6 +141,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
         setActiveId(convId);
         setActiveConv(newConv);
       } catch {
+        sendingRef.current = false;
         return;
       }
     }
@@ -152,6 +155,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
         title: conv.messages.length === 0 ? text.slice(0, 20) : conv.title,
       });
     } catch {
+      sendingRef.current = false;
       return;
     }
     setInput('');
@@ -232,6 +236,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       setStreamingText('');
       streamingConvIdRef.current = null;
       abortRef.current = null;
+      sendingRef.current = false;
     }
   };
 

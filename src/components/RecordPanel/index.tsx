@@ -7,6 +7,7 @@ import type { MealType, ReactionType, DayCount } from '../../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods, getFoodById, foodCategories } from '../../config/foodConfig';
 import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
+import { buildRelatedHint, type RelatedHint } from '../../config/relatedFoodGroups';
 
 import { today } from '../../utils/date';
 
@@ -37,6 +38,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   const [showHistory, setShowHistory] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [relatedHint, setRelatedHint] = useState<RelatedHint | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   // 判断是否为编辑模式：加载已有记录
@@ -60,6 +64,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         const foodInfo = getFoodById(existing.foodId);
         setRecordCategoryId(existing.categoryId || foodInfo?.categoryId || '');
         setIsEditMode(true);
+        setRelatedHint(buildRelatedHint(existing.foodId, existing.foodName));
         return;
       }
     }
@@ -83,6 +88,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
         const foodInfo = getFoodById(existingRecord.foodId);
         setRecordCategoryId(existingRecord.categoryId || foodInfo?.categoryId || '');
         setIsEditMode(true);
+        setRelatedHint(buildRelatedHint(existingRecord.foodId, existingRecord.foodName));
         return;
       }
     }
@@ -100,6 +106,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       else if (status === 'observing') { setReaction('observing'); }
       else if (status === 'suspected') { setReaction('suspected'); }
       else { setReaction('safe'); setDayCount('day1'); }
+      setRelatedHint(buildRelatedHint(prefillFood.id, prefillFood.name));
+    } else {
+      setRelatedHint(null);
     }
     // 预填食物时自动设置分类
     if (prefillFood) {
@@ -129,6 +138,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
           // 自动选中
           setSelectedFoodId(exactMatch.id);
           setSelectedFoodName(exactMatch.name);
+          refreshRelatedHint(exactMatch.id, exactMatch.name);
           const foodInfo = getFoodById(exactMatch.id);
           setRecordCategoryId(foodInfo?.categoryId || '');
           setShowSearch(false);
@@ -204,7 +214,16 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setRecordCategoryId('');
     setWarningMsg('');
     setReactionHint('');
+    setRelatedHint(null);
     setIsEditMode(false);
+  };
+
+  const refreshRelatedHint = (foodId: string, foodName?: string) => {
+    if (!foodId) {
+      setRelatedHint(null);
+      return;
+    }
+    setRelatedHint(buildRelatedHint(foodId, foodName));
   };
 
   const handleSelectFood = (food: { id: string; name: string }) => {
@@ -213,6 +232,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     setFoodQuery(food.name);
     setShowSearch(false);
     setReactionHint('');
+    refreshRelatedHint(food.id, food.name);
 
     // 设置分类ID
     const foodInfo = getFoodById(food.id);
@@ -242,6 +262,8 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   // ============ 保存 ============
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+
     // 使用 foodQuery 作为食物名称（支持输入自定义食材）
     const foodName = selectedFoodName.trim() || foodQuery.trim();
     if (!foodName) {
@@ -252,6 +274,15 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     // 检查是否选择了分类，未选则默认为「其他」
     if (!recordCategoryId) {
       setRecordCategoryId('other');
+    }
+
+    const foodId = selectedFoodId || 'custom_' + generateId();
+    const hint = buildRelatedHint(foodId, foodName);
+    setRelatedHint(hint);
+
+    // 同类提示确认（先于同时排敏提醒）
+    if (!isEditMode && hint?.requireConfirm) {
+      if (!window.confirm(hint.confirmMessage)) return;
     }
 
     // 同时排敏检测（仅新建时）
@@ -272,8 +303,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       }
     }
 
-    const foodId = selectedFoodId || 'custom_' + Date.now();
     const saveCategoryId = recordCategoryId || 'other';
+    savingRef.current = true;
+    setSaving(true);
 
     try {
       // 编辑模式：更新已有记录
@@ -328,6 +360,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       onClose();
     } catch {
       // 错误已由全局提示展示
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -354,7 +389,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
   // 确认删除记录
   const handleConfirmDelete = async () => {
-    if (!deleteConfirmId) return;
+    if (!deleteConfirmId || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       await deleteRecord(deleteConfirmId);
       const shouldClosePanel = isEditMode || deleteConfirmId === editRecordId;
@@ -371,6 +408,9 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       }
     } catch {
       // 错误已由全局提示展示
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -416,6 +456,33 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
             <div className="mb-3 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2.5 flex items-start gap-2">
               <span className="text-sm flex-shrink-0">⚠️</span>
               <p className="text-xs text-yellow-700 leading-relaxed">{warningMsg}</p>
+            </div>
+          )}
+
+          {relatedHint && (
+            <div
+              className={`mb-3 rounded-xl px-3 py-2.5 flex items-start gap-2 border ${
+                relatedHint.level === 'danger'
+                  ? 'bg-red-50 border-red-200'
+                  : relatedHint.level === 'warn'
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-sky-50 border-sky-200'
+              }`}
+            >
+              <span className="text-sm flex-shrink-0">
+                {relatedHint.level === 'danger' ? '⚠️' : relatedHint.level === 'warn' ? '💡' : 'ℹ️'}
+              </span>
+              <p
+                className={`text-xs leading-relaxed ${
+                  relatedHint.level === 'danger'
+                    ? 'text-red-700'
+                    : relatedHint.level === 'warn'
+                      ? 'text-amber-800'
+                      : 'text-sky-800'
+                }`}
+              >
+                {relatedHint.message}
+              </p>
             </div>
           )}
 
@@ -663,9 +730,12 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
               </button>
               <button
                 onClick={handleSave}
-                className="flex-1 py-3 rounded-xl text-white bg-orange-400 font-medium active:bg-orange-500"
+                disabled={saving}
+                className={`flex-1 py-3 rounded-xl text-white font-medium ${
+                  saving ? 'bg-orange-300 cursor-wait' : 'bg-orange-400 active:bg-orange-500'
+                }`}
               >
-                保存修改
+                {saving ? '保存中...' : '保存修改'}
               </button>
             </div>
           ) : (
@@ -673,15 +743,19 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
             <div className="flex gap-3">
               <button
                 onClick={handleCancel}
+                disabled={saving}
                 className="flex-1 py-3 rounded-xl text-amber-600 bg-amber-50 border border-amber-200 font-medium"
               >
                 取消
               </button>
               <button
                 onClick={handleSave}
-                className="flex-1 py-3 rounded-xl text-white bg-orange-400 font-medium active:bg-orange-500"
+                disabled={saving}
+                className={`flex-1 py-3 rounded-xl text-white font-medium ${
+                  saving ? 'bg-orange-300 cursor-wait' : 'bg-orange-400 active:bg-orange-500'
+                }`}
               >
-                保存
+                {saving ? '保存中...' : '保存'}
               </button>
             </div>
           )}

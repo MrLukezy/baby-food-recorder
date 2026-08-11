@@ -26,6 +26,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const [statFilter, setStatFilter] = useState<string | null>(null);
   const [expandedFood, setExpandedFood] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{foodName: string; recordId: string} | null>(null);
+  const [clearing, setClearing] = useState(false);
   const avatarRef = useRef<HTMLInputElement>(null);
 
 
@@ -168,12 +169,16 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   };
 
   const handleClearData = async () => {
+    if (clearing) return;
     if (!window.confirm('确定要清除所有数据吗？此操作不可恢复！')) return;
+    setClearing(true);
     try {
       await clearAllData();
       onClearData();
     } catch {
       // 错误已由全局提示展示
+    } finally {
+      setClearing(false);
     }
   };
 

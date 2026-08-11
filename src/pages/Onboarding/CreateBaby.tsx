@@ -13,11 +13,12 @@ interface CreateBabyProps {
 const CreateBaby: React.FC<CreateBabyProps> = ({ onNext }) => {
   const [name, setName] = useState('');
   const [birthday, setBirthday] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const canProceed = name.trim().length > 0 && birthday.length > 0;
+  const canProceed = name.trim().length > 0 && birthday.length > 0 && !saving;
 
   const handleNext = async () => {
-    if (!canProceed) return;
+    if (!canProceed || saving) return;
 
     const profile: BabyProfile = {
       id: generateId(),
@@ -27,11 +28,14 @@ const CreateBaby: React.FC<CreateBabyProps> = ({ onNext }) => {
       updatedAt: new Date().toISOString(),
     };
 
+    setSaving(true);
     try {
       await saveProfile(profile);
       onNext(profile);
     } catch {
       // 错误已由全局提示展示
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -88,7 +92,7 @@ const CreateBaby: React.FC<CreateBabyProps> = ({ onNext }) => {
             : 'bg-amber-100 text-amber-300 cursor-not-allowed'
         }`}
       >
-        下一步 →
+        {saving ? '保存中...' : '下一步 →'}
       </button>
     </div>
   );

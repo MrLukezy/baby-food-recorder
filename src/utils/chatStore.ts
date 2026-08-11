@@ -35,6 +35,17 @@ const chatMemory: ChatMemory = {
   activeConversationId: null,
 };
 
+const writeChains = {
+  conversations: Promise.resolve(),
+  memories: Promise.resolve(),
+};
+
+function enqueueChatWrite(key: keyof typeof writeChains, fn: () => Promise<void>): Promise<void> {
+  const next = writeChains[key].catch(() => undefined).then(fn);
+  writeChains[key] = next.catch(() => undefined);
+  return next;
+}
+
 export async function bootstrapChatFromServer(): Promise<void> {
   return withFeedback('加载对话中...', async () => {
     const [conversations, memories] = await Promise.all([
@@ -78,10 +89,12 @@ export function getConversations(): Conversation[] {
 }
 
 export async function saveConversations(list: Conversation[]): Promise<void> {
-  return withFeedback('保存对话中...', async () => {
-    await apiPost('/conversations', { action: 'replace', data: list });
-    chatMemory.conversations = list;
-  });
+  return withFeedback('保存对话中...', () =>
+    enqueueChatWrite('conversations', async () => {
+      await apiPost('/conversations', { action: 'replace', data: list });
+      chatMemory.conversations = list;
+    })
+  );
 }
 
 export async function createConversation(title?: string): Promise<Conversation> {
@@ -133,10 +146,12 @@ export function getMemories(): AIAgentMemory[] {
 }
 
 export async function saveMemories(list: AIAgentMemory[]): Promise<void> {
-  return withFeedback('保存记忆中...', async () => {
-    await apiPost('/memories', list);
-    chatMemory.memories = list;
-  });
+  return withFeedback('保存记忆中...', () =>
+    enqueueChatWrite('memories', async () => {
+      await apiPost('/memories', list);
+      chatMemory.memories = list;
+    })
+  );
 }
 
 export async function addMemory(key: string, value: string, source: string): Promise<void> {

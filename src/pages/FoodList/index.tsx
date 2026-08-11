@@ -21,6 +21,7 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [listTab, setListTab] = useState<'tested' | 'untested'>('tested');
   const [removeConfirm, setRemoveConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const forceRefresh = useCallback(() => setRefresh(n => n + 1), []);
 
@@ -316,8 +317,9 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                 </button>
                 <button
                   onClick={async () => {
-                    if (!removeConfirm) return;
+                    if (!removeConfirm || removing) return;
                     const { id } = removeConfirm;
+                    setRemoving(true);
                     try {
                       const records = getRecords();
                       const remaining = records.filter(r => r.foodId !== id);
@@ -330,11 +332,14 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                       forceRefresh();
                     } catch {
                       // 错误已由全局提示展示
+                    } finally {
+                      setRemoving(false);
                     }
                   }}
-                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"
+                  disabled={removing}
+                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm disabled:opacity-60"
                 >
-                  确认移除
+                  {removing ? '移除中...' : '确认移除'}
                 </button>
               </div>
             </div>
