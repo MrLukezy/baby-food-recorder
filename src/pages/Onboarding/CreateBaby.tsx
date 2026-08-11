@@ -16,7 +16,7 @@ const CreateBaby: React.FC<CreateBabyProps> = ({ onNext }) => {
 
   const canProceed = name.trim().length > 0 && birthday.length > 0;
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!canProceed) return;
 
     const profile: BabyProfile = {
@@ -27,8 +27,12 @@ const CreateBaby: React.FC<CreateBabyProps> = ({ onNext }) => {
       updatedAt: new Date().toISOString(),
     };
 
-    saveProfile(profile);
-    onNext(profile);
+    try {
+      await saveProfile(profile);
+      onNext(profile);
+    } catch {
+      // 错误已由全局提示展示
+    }
   };
 
   return (

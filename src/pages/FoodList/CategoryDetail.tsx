@@ -302,13 +302,17 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                 取消
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!newFoodName.trim()) return;
-                  addCustomFood(newFoodName, categoryId, newFoodLevel);
-                  setShowAddForm(false);
-                  setNewFoodName('');
-                  setNewFoodLevel('low');
-                  forceUpdate(n => n + 1);
+                  try {
+                    await addCustomFood(newFoodName, categoryId, newFoodLevel);
+                    setShowAddForm(false);
+                    setNewFoodName('');
+                    setNewFoodLevel('low');
+                    forceUpdate(n => n + 1);
+                  } catch {
+                    // 错误已由全局提示展示
+                  }
                 }}
                 className="flex-1 py-3 rounded-xl bg-orange-400 text-white font-medium"
               >
@@ -343,11 +347,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                 取消
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!editFoodName.trim()) return;
-                  updateCustomFood(editFoodId, editFoodName);
-                  setEditFoodId(null);
-                  forceUpdate(n => n + 1);
+                  try {
+                    await updateCustomFood(editFoodId, editFoodName);
+                    setEditFoodId(null);
+                    forceUpdate(n => n + 1);
+                  } catch {
+                    // 错误已由全局提示展示
+                  }
                 }}
                 className="flex-1 py-3 rounded-xl bg-orange-400 text-white font-medium"
               >
@@ -380,12 +388,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                   取消
                 </button>
                 <button
-                  onClick={() => {
-                    if (deleteConfirmId) {
-                      deleteCustomFood(deleteConfirmId);
+                  onClick={async () => {
+                    if (!deleteConfirmId) return;
+                    try {
+                      await deleteCustomFood(deleteConfirmId);
                       setDeleteConfirmId(null);
                       setDeleteConfirmName('');
                       forceUpdate(n => n + 1);
+                    } catch {
+                      // 错误已由全局提示展示
                     }
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"

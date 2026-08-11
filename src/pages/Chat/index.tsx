@@ -54,7 +54,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConv?.messages, streamingText]);
 
-  const handleNewConversation = () => {
+  const handleNewConversation = async () => {
     // 切换前如果正在流式输出，先中止并清除
     if (abortRef.current) {
       abortRef.current.abort();
@@ -63,11 +63,15 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       setStreamingText('');
       streamingConvIdRef.current = null;
     }
-    const conv = createConversation('新对话 ' + new Date().toLocaleDateString('zh-CN'));
-    setConversations(getConversations());
-    setActiveId(conv.id);
-    setActiveConv(conv);
-    setShowSidebar(false);
+    try {
+      const conv = await createConversation('新对话 ' + new Date().toLocaleDateString('zh-CN'));
+      setConversations(getConversations());
+      setActiveId(conv.id);
+      setActiveConv(conv);
+      setShowSidebar(false);
+    } catch {
+      // 错误已由全局提示展示
+    }
   };
 
   const handleSelectConversation = (id: string) => {
@@ -85,7 +89,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
     setShowSidebar(false);
   };
 
-  const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
+  const handleDeleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('确定删除这个对话？')) return;
 
@@ -98,18 +102,22 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       streamingConvIdRef.current = null;
     }
 
-    deleteConversation(id);
-    const list = getConversations();
-    setConversations(list);
-    if (activeId === id) {
-      if (list.length > 0) {
-        setActiveId(list[0].id);
-        setActiveConv(list[0]);
-        setActiveConversationId(list[0].id);
-      } else {
-        setActiveId(null);
-        setActiveConv(null);
+    try {
+      await deleteConversation(id);
+      const list = getConversations();
+      setConversations(list);
+      if (activeId === id) {
+        if (list.length > 0) {
+          setActiveId(list[0].id);
+          setActiveConv(list[0]);
+          setActiveConversationId(list[0].id);
+        } else {
+          setActiveId(null);
+          setActiveConv(null);
+        }
       }
+    } catch {
+      // 错误已由全局提示展示
     }
   };
 
@@ -123,21 +131,29 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
     let conv = activeConv;
     let convId = activeId;
     if (!conv || !convId) {
-      const newConv = createConversation(text.slice(0, 20));
-      setConversations(getConversations());
-      conv = newConv;
-      convId = newConv.id;
-      setActiveId(convId);
-      setActiveConv(newConv);
+      try {
+        const newConv = await createConversation(text.slice(0, 20));
+        setConversations(getConversations());
+        conv = newConv;
+        convId = newConv.id;
+        setActiveId(convId);
+        setActiveConv(newConv);
+      } catch {
+        return;
+      }
     }
 
     // 添加用户消息
     const userMsg: ChatMessage = { role: 'user', content: text };
     const newMessages = [...conv.messages, userMsg];
-    updateConversation(convId, {
-      messages: newMessages,
-      title: conv.messages.length === 0 ? text.slice(0, 20) : conv.title,
-    });
+    try {
+      await updateConversation(convId, {
+        messages: newMessages,
+        title: conv.messages.length === 0 ? text.slice(0, 20) : conv.title,
+      });
+    } catch {
+      return;
+    }
     setInput('');
 
     // 刷新本地显示
@@ -180,9 +196,8 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: finalText };
       const finalMessages = [...newMessages, assistantMsg];
-      updateConversation(convId, { messages: finalMessages });
+      await updateConversation(convId, { messages: finalMessages });
 
-      // 如果当前还显示这个会话，刷新列表；否则只更新 localStorage，UI 不刷新
       setActiveConv(prev => {
         if (prev && prev.id === convId) {
           return { ...prev, messages: finalMessages };
@@ -192,7 +207,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       setConversations(getConversations());
 
       // 自动保存重要信息到记忆
-      autoExtractMemory(text, finalText, convId);
+      await autoExtractMemory(text, finalText, convId);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         const errorMsg: ChatMessage = {
@@ -200,7 +215,11 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
           content: `⚠️ 抱歉，AI 响应失败：${err.message}\n\n请检查网络连接或稍后重试。`,
         };
         const finalMessages = [...newMessages, errorMsg];
-        updateConversation(convId, { messages: finalMessages });
+        try {
+          await updateConversation(convId, { messages: finalMessages });
+        } catch {
+          // 忽略二次保存失败
+        }
         setActiveConv(prev => {
           if (prev && prev.id === convId) {
             return { ...prev, messages: finalMessages };
@@ -221,7 +240,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
   };
 
   // 自动从对话中提取记忆（简单启发式）
-  const autoExtractMemory = (userText: string, _aiText: string, convId: string) => {
+  const autoExtractMemory = async (userText: string, _aiText: string, convId: string) => {
     const lower = userText.toLowerCase();
     // 如果用户提到宝宝相关信息，保存为记忆
     const memoryPatterns = [
@@ -237,7 +256,11 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
         // 简单提取：把用户原文作为记忆
         const existing = getMemories().find(m => m.key === pattern.key);
         if (!existing) {
-          addMemory(pattern.key, userText, convId);
+          try {
+            await addMemory(pattern.key, userText, convId);
+          } catch {
+            // 忽略记忆保存失败
+          }
         }
       }
     }
@@ -474,10 +497,13 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
                         </div>
                       </div>
                       <button
-                        onClick={() => {
-                          deleteMemory(m.key);
-                          // 强制刷新
-                          setConversations([...getConversations()]);
+                        onClick={async () => {
+                          try {
+                            await deleteMemory(m.key);
+                            setConversations([...getConversations()]);
+                          } catch {
+                            // 错误已由全局提示展示
+                          }
                         }}
                         className="text-amber-300 hover:text-red-500 text-xs flex-shrink-0"
                       >

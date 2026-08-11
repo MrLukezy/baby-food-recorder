@@ -2,10 +2,10 @@
 // 主应用入口（Hash 路由 + 微信兼容返回键）
 // ============================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import type { BabyProfile } from './types';
-import { getProfile, loadDataFromServer } from './store';
-import { loadChatDataFromServer } from './utils/chatStore';
+import { getProfile, bootstrapFromServer } from './store';
+import { bootstrapChatFromServer } from './utils/chatStore';
 import CreateBaby from './pages/Onboarding/CreateBaby';
 import SelectFoods from './pages/Onboarding/SelectFoods';
 import Home from './pages/Home';
@@ -15,32 +15,34 @@ import ProfilePage from './pages/Profile';
 import CategoryDetail from './pages/FoodList/CategoryDetail';
 import ChatPage from './pages/Chat';
 import TabBar, { type TabKey } from './components/TabBar';
+import GlobalFeedback from './components/GlobalFeedback';
 
 type Page =
+  | { type: 'boot' }
+  | { type: 'boot_error'; message: string }
   | { type: 'onboarding_create' }
   | { type: 'onboarding_foods' }
   | { type: 'tab'; tab: TabKey }
   | { type: 'category_detail'; categoryId: string }
   | { type: 'chat' };
 
-// Hash 路由工具函数
 function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'category_detail'; categoryId: string } | { type: 'chat' } | null {
   const cleanHash = hash.replace('#', '');
-  
+
   if (!cleanHash) return null;
-  
+
   if (['home', 'calendar', 'food', 'profile'].includes(cleanHash)) {
     return { type: 'tab', tab: cleanHash as TabKey };
   }
-  
+
   if (cleanHash.startsWith('category-')) {
     return { type: 'category_detail', categoryId: cleanHash.replace('category-', '') };
   }
-  
+
   if (cleanHash === 'chat') {
     return { type: 'chat' };
   }
-  
+
   return null;
 }
 
@@ -53,55 +55,56 @@ function pageToHash(page: Page): string {
 
 function App() {
   const [profile, setProfile] = useState<BabyProfile | null>(null);
-  const [page, setPage] = useState<Page>({ type: 'onboarding_create' });
+  const [page, setPage] = useState<Page>({ type: 'boot' });
   const currentPageRef = useRef<Page>(page);
 
-  // 同步 ref
   useEffect(() => {
     currentPageRef.current = page;
   }, [page]);
 
-  // ============ 初始化 + 全量同步到服务端 ============
   useEffect(() => {
-    // ===== 初始化：从服务端拉取数据填充 localStorage（仅首次且本地为空时） =====
     const init = async () => {
-      await loadDataFromServer();
-      await loadChatDataFromServer();
+      try {
+        await bootstrapFromServer();
+        await bootstrapChatFromServer();
 
-      // 设置页面状态
-      const existing = getProfile();
-      if (existing) {
-        setProfile(existing);
-        const hashPage = parseHash(window.location.hash);
-        if (hashPage) {
-          setPage(hashPage);
+        const existing = getProfile();
+        if (existing) {
+          setProfile(existing);
+          const hashPage = parseHash(window.location.hash);
+          if (hashPage) {
+            setPage(hashPage);
+          } else {
+            setPage({ type: 'tab', tab: 'home' });
+            window.location.hash = '#home';
+          }
         } else {
-          setPage({ type: 'tab', tab: 'home' });
-          window.location.hash = '#home';
+          setPage({ type: 'onboarding_create' });
         }
+      } catch (e: any) {
+        setPage({
+          type: 'boot_error',
+          message: e?.message || '无法从服务器加载数据',
+        });
       }
     };
     init();
   }, []);
 
-  // ============ Hash 路由监听 ============
   useEffect(() => {
     const handler = () => {
       const hash = window.location.hash;
-      
-      // 如果 hash 为空（用户按了返回键试图退出），重新设置当前页面的 hash
+
       if (!hash || hash === '#') {
         const current = currentPageRef.current;
         if (current.type === 'tab' || current.type === 'category_detail') {
-          // 恢复 hash，阻止关闭页面
           setTimeout(() => {
             window.location.hash = pageToHash(current);
           }, 10);
         }
         return;
       }
-      
-      // 解析新的 hash
+
       const newPage = parseHash(hash);
       if (newPage) {
         setPage(newPage);
@@ -112,18 +115,14 @@ function App() {
     return () => window.removeEventListener('hashchange', handler);
   }, []);
 
-  // ============ 页面变化时更新 hash ============
   useEffect(() => {
     if (page.type === 'tab' || page.type === 'category_detail') {
       const newHash = pageToHash(page);
-      // 只在 hash 不同时更新，避免循环
       if (window.location.hash !== newHash) {
         window.location.hash = newHash;
       }
     }
   }, [page]);
-
-  // ============ 导航回调 ============
 
   const handleBabyCreated = useCallback((p: BabyProfile) => {
     setProfile(p);
@@ -156,98 +155,73 @@ function App() {
     setPage({ type: 'chat' });
   }, []);
 
-  // 数据同步 - 暂时隐藏
-  // const [syncing, setSyncing] = useState(false);
-  // const [syncMsg, setSyncMsg] = useState('');
-  //
-  // const handleForceSync = useCallback(async () => {
-  //   setSyncing(true);
-  //   setSyncMsg('同步中...');
-  //   try {
-  //     const BASE_URL = import.meta.env.DEV
-  //       ? 'http://127.0.0.1:3003/api'
-  //       : '/babyfoodrecorder/api';
-  //
-  //     const profile = getProfile();
-  //     const records = getRecords();
-  //     const presets = getPresetAllergens();
-  //     const convs = getConversations();
-  //     const mems = getMemories();
-  //
-  //     await Promise.all([
-  //       fetch(BASE_URL + '/profile', {
-  //         method: 'POST', headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify(profile || {}),
-  //       }),
-  //       fetch(BASE_URL + '/records', {
-  //         method: 'POST', headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify({ action: 'replace', records }),
-  //       }),
-  //       fetch(BASE_URL + '/presets', {
-  //         method: 'POST', headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify(presets),
-  //       }),
-  //       fetch(BASE_URL + '/conversations', {
-  //         method: 'POST', headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify({ action: 'replace', data: convs }),
-  //       }),
-  //       fetch(BASE_URL + '/memories', {
-  //         method: 'POST', headers: { 'Content-Type': 'application/json' },
-  //         body: JSON.stringify(mems),
-  //       }),
-  //     ]);
-  //
-  //     setSyncMsg('✅ 同步成功');
-  //     setTimeout(() => setSyncMsg(''), 2000);
-  //   } catch (e) {
-  //     setSyncMsg('❌ 同步失败');
-  //     setTimeout(() => setSyncMsg(''), 3000);
-  //   } finally {
-  //     setSyncing(false);
-  //   }
-  // }, []);
+  const handleRetryBoot = useCallback(() => {
+    setPage({ type: 'boot' });
+    (async () => {
+      try {
+        await bootstrapFromServer();
+        await bootstrapChatFromServer();
+        const existing = getProfile();
+        if (existing) {
+          setProfile(existing);
+          setPage({ type: 'tab', tab: 'home' });
+          window.location.hash = '#home';
+        } else {
+          setPage({ type: 'onboarding_create' });
+        }
+      } catch (e: any) {
+        setPage({
+          type: 'boot_error',
+          message: e?.message || '无法从服务器加载数据',
+        });
+      }
+    })();
+  }, []);
 
-  // ============ 路由渲染 ============
+  let content: ReactNode = null;
 
-  // 引导页：创建宝宝
-  if (page.type === 'onboarding_create') {
-    return <CreateBaby onNext={handleBabyCreated} />;
-  }
-
-  // 引导页：选择食物
-  if (page.type === 'onboarding_foods') {
-    return (
+  if (page.type === 'boot') {
+    content = (
+      <div className="min-h-screen bg-[#FFF8F0] flex items-center justify-center">
+        <p className="text-amber-700 text-sm">正在从服务器加载...</p>
+      </div>
+    );
+  } else if (page.type === 'boot_error') {
+    content = (
+      <div className="min-h-screen bg-[#FFF8F0] flex flex-col items-center justify-center px-6 gap-4">
+        <div className="text-5xl">📡</div>
+        <h1 className="text-lg font-bold text-amber-900">加载失败</h1>
+        <p className="text-sm text-amber-700 text-center">{page.message}</p>
+        <button
+          type="button"
+          onClick={handleRetryBoot}
+          className="mt-2 px-6 py-3 rounded-xl bg-orange-400 text-white font-bold shadow-lg shadow-orange-200"
+        >
+          重试
+        </button>
+      </div>
+    );
+  } else if (page.type === 'onboarding_create') {
+    content = <CreateBaby onNext={handleBabyCreated} />;
+  } else if (page.type === 'onboarding_foods') {
+    content = (
       <SelectFoods
         onBack={() => setPage({ type: 'onboarding_create' })}
         onDone={handleFoodsDone}
       />
     );
-  }
-
-  // 分类详情页
-  if (page.type === 'category_detail') {
-    return (
+  } else if (page.type === 'category_detail') {
+    content = (
       <CategoryDetail
         categoryId={page.categoryId}
         onBack={() => setPage({ type: 'tab', tab: 'food' })}
       />
     );
-  }
-
-  // AI 助手页
-  if (page.type === 'chat') {
-    return (
-      <ChatPage
-        onBack={() => setPage({ type: 'tab', tab: 'home' })}
-      />
-    );
-  }
-
-  // 主页面（Tab）
-  if (page.type === 'tab' && profile) {
+  } else if (page.type === 'chat') {
+    content = <ChatPage onBack={() => setPage({ type: 'tab', tab: 'home' })} />;
+  } else if (page.type === 'tab' && profile) {
     const activeTab = page.tab;
-
-    return (
+    content = (
       <div className="max-w-lg mx-auto relative">
         {activeTab === 'home' && (
           <Home profile={profile} onNavigateCategory={handleNavigateCategory} />
@@ -264,13 +238,16 @@ function App() {
           />
         )}
         <TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />
-
-        {/* 数据同步按钮 - 暂时隐藏 */}
       </div>
     );
   }
 
-  return null;
+  return (
+    <>
+      {content}
+      <GlobalFeedback />
+    </>
+  );
 }
 
 export default App;

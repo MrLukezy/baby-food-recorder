@@ -1,58 +1,12 @@
 /**
- * AI 对话数据管理 - 多会话 + 记忆系统（localStorage 持久化 + 服务端同步）
+ * AI 对话数据管理 - 多会话 + 记忆系统
+ * 内存镜像 + 服务端读写，无 localStorage
  */
 
 import type { ChatMessage } from './ai';
-
-const SYNC_URL = import.meta.env.DEV
-  ? 'http://127.0.0.1:3003/api'
-  : '/babyfoodrecorder/api';
-
-// ============ 初始化加载：从服务端拉取数据到本地 localStorage ============
-
-export async function loadChatDataFromServer(): Promise<void> {
-  try {
-    const res = await fetch(`${SYNC_URL}/conversations`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        localStorage.setItem('ai_conversations', JSON.stringify(data));
-      }
-    }
-    const res2 = await fetch(`${SYNC_URL}/memories`);
-    if (res2.ok) {
-      const data = await res2.json();
-      if (Array.isArray(data)) {
-        localStorage.setItem('ai_agent_memory', JSON.stringify(data));
-      }
-    }
-    console.log('聊天数据从服务端强制刷新加载完成');
-  } catch { /* ignore */ }
-}
-
-// ============ 服务端同步 ============
-
-async function syncConversations(): Promise<void> {
-  try {
-    const convs = getConversations();
-    await fetch(`${SYNC_URL}/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'replace', data: convs }),
-    });
-  } catch { /* ignore */ }
-}
-
-async function syncMemories(): Promise<void> {
-  try {
-    const mems = getMemories();
-    await fetch(`${SYNC_URL}/memories`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mems),
-    });
-  } catch { /* ignore */ }
-}
+import { apiGet, apiPost } from '../store/api';
+import { withFeedback } from '../store/feedback';
+import { getProfile, getRecords, getPresetAllergens } from '../store';
 
 export interface Conversation {
   id: string;
@@ -63,17 +17,34 @@ export interface Conversation {
 }
 
 export interface AIAgentMemory {
-  key: string;      // 记忆关键词
-  value: string;    // 记忆内容
-  source: string;   // 来源会话 ID
+  key: string;
+  value: string;
+  source: string;
   createdAt: string;
 }
 
-const KEY_CONVERSATIONS = 'ai_conversations';
-const KEY_ACTIVE_CONVERSATION = 'ai_active_conversation';
-const KEY_MEMORY = 'ai_agent_memory';
+type ChatMemory = {
+  conversations: Conversation[];
+  memories: AIAgentMemory[];
+  activeConversationId: string | null;
+};
 
-// ============ 系统提示词 ============
+const chatMemory: ChatMemory = {
+  conversations: [],
+  memories: [],
+  activeConversationId: null,
+};
+
+export async function bootstrapChatFromServer(): Promise<void> {
+  return withFeedback('加载对话中...', async () => {
+    const [conversations, memories] = await Promise.all([
+      apiGet<Conversation[]>('/conversations'),
+      apiGet<AIAgentMemory[]>('/memories'),
+    ]);
+    chatMemory.conversations = Array.isArray(conversations) ? conversations : [];
+    chatMemory.memories = Array.isArray(memories) ? memories : [];
+  });
+}
 
 export const SYSTEM_PROMPT = `你是一位专业的宝宝辅食规划管理师，拥有以下专业背景：
 
@@ -103,20 +74,17 @@ export const SYSTEM_PROMPT = `你是一位专业的宝宝辅食规划管理师�
 // ============ 会话管理 ============
 
 export function getConversations(): Conversation[] {
-  try {
-    const raw = localStorage.getItem(KEY_CONVERSATIONS);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return chatMemory.conversations;
 }
 
-export function saveConversations(list: Conversation[]): void {
-  localStorage.setItem(KEY_CONVERSATIONS, JSON.stringify(list));
-  syncConversations();
+export async function saveConversations(list: Conversation[]): Promise<void> {
+  return withFeedback('保存对话中...', async () => {
+    await apiPost('/conversations', { action: 'replace', data: list });
+    chatMemory.conversations = list;
+  });
 }
 
-export function createConversation(title?: string): Conversation {
+export async function createConversation(title?: string): Promise<Conversation> {
   const conv: Conversation = {
     id: 'conv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     title: title || '新对话',
@@ -124,98 +92,86 @@ export function createConversation(title?: string): Conversation {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  const all = getConversations();
-  all.unshift(conv);
-  saveConversations(all);
+  const all = [conv, ...chatMemory.conversations];
+  await saveConversations(all);
   setActiveConversationId(conv.id);
   return conv;
 }
 
 export function getConversation(id: string): Conversation | null {
-  return getConversations().find(c => c.id === id) || null;
+  return chatMemory.conversations.find(c => c.id === id) || null;
 }
 
-export function updateConversation(id: string, updates: Partial<Conversation>): void {
-  const all = getConversations().map(c =>
+export async function updateConversation(id: string, updates: Partial<Conversation>): Promise<void> {
+  const all = chatMemory.conversations.map(c =>
     c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
   );
-  saveConversations(all);
+  await saveConversations(all);
 }
 
-export function deleteConversation(id: string): void {
-  const all = getConversations().filter(c => c.id !== id);
-  saveConversations(all);
+export async function deleteConversation(id: string): Promise<void> {
+  const all = chatMemory.conversations.filter(c => c.id !== id);
+  await saveConversations(all);
   if (getActiveConversationId() === id) {
-    localStorage.removeItem(KEY_ACTIVE_CONVERSATION);
+    chatMemory.activeConversationId = null;
   }
 }
 
+/** 当前会话 ID 仅作会话内 UI 状态，不持久化到本地/服务端 */
 export function setActiveConversationId(id: string | null): void {
-  if (id) localStorage.setItem(KEY_ACTIVE_CONVERSATION, id);
-  else localStorage.removeItem(KEY_ACTIVE_CONVERSATION);
+  chatMemory.activeConversationId = id;
 }
 
 export function getActiveConversationId(): string | null {
-  return localStorage.getItem(KEY_ACTIVE_CONVERSATION);
+  return chatMemory.activeConversationId;
 }
 
 // ============ 记忆系统 ============
 
 export function getMemories(): AIAgentMemory[] {
-  try {
-    const raw = localStorage.getItem(KEY_MEMORY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return chatMemory.memories;
 }
 
-export function saveMemories(list: AIAgentMemory[]): void {
-  localStorage.setItem(KEY_MEMORY, JSON.stringify(list));
-  syncMemories();
-}
-
-export function addMemory(key: string, value: string, source: string): void {
-  const all = getMemories();
-  all.push({
-    key,
-    value,
-    source,
-    createdAt: new Date().toISOString(),
+export async function saveMemories(list: AIAgentMemory[]): Promise<void> {
+  return withFeedback('保存记忆中...', async () => {
+    await apiPost('/memories', list);
+    chatMemory.memories = list;
   });
-  saveMemories(all);
 }
 
-export function deleteMemory(key: string): void {
-  const all = getMemories().filter(m => m.key !== key);
-  saveMemories(all);
+export async function addMemory(key: string, value: string, source: string): Promise<void> {
+  const all = [
+    ...chatMemory.memories,
+    {
+      key,
+      value,
+      source,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+  await saveMemories(all);
 }
 
-/** 生成记忆摘要，用于注入到对话上下文中 */
+export async function deleteMemory(key: string): Promise<void> {
+  await saveMemories(chatMemory.memories.filter(m => m.key !== key));
+}
+
 export function getMemorySummary(): string {
   const memories = getMemories();
   if (memories.length === 0) return '';
-
-  return memories
-    .map(m => `- ${m.key}：${m.value}`)
-    .join('\n');
+  return memories.map(m => `- ${m.key}：${m.value}`).join('\n');
 }
 
 // ============ 宝宝数据整合（给 AI 上下文用） ============
 
 export function buildBabyContext(): string {
   try {
-    const profileRaw = localStorage.getItem('baby_profile');
-    const recordsRaw = localStorage.getItem('food_records');
-    const presetsRaw = localStorage.getItem('preset_allergens');
+    const profile = getProfile();
+    if (!profile) return '';
 
-    if (!profileRaw) return '';
+    const records = getRecords();
+    const presets = getPresetAllergens();
 
-    const profile = JSON.parse(profileRaw);
-    const records: any[] = recordsRaw ? JSON.parse(recordsRaw) : [];
-    const presets: string[] = presetsRaw ? JSON.parse(presetsRaw) : [];
-
-    // 计算月龄
     const birthday = new Date(profile.birthday);
     const now = new Date();
     let months = (now.getFullYear() - birthday.getFullYear()) * 12 + (now.getMonth() - birthday.getMonth());
@@ -226,7 +182,6 @@ export function buildBabyContext(): string {
       days += prevMonth.getDate();
     }
 
-    // 按食物分组
     const foodMap = new Map<string, { name: string; days: Set<string>; reactions: string[] }>();
     for (const r of records) {
       if (!foodMap.has(r.foodId)) {
@@ -253,7 +208,6 @@ export function buildBabyContext(): string {
       else observing.push(`${data.name}(${dayCount}/3天)`);
     }
 
-    // 预设食物
     for (const id of presets) {
       if (!foodMap.has(id)) {
         safe.push(`[预设]${id}`);
@@ -275,8 +229,6 @@ export function buildBabyContext(): string {
     return '';
   }
 }
-
-// ============ 唯一 ID 生成 ============
 
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);

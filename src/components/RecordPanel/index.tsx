@@ -241,7 +241,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
   // ============ 保存 ============
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // 使用 foodQuery 作为食物名称（支持输入自定义食材）
     const foodName = selectedFoodName.trim() || foodQuery.trim();
     if (!foodName) {
@@ -273,60 +273,62 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     }
 
     const foodId = selectedFoodId || 'custom_' + Date.now();
-    const saveCategoryId = recordCategoryId;
+    const saveCategoryId = recordCategoryId || 'other';
 
-    // 编辑模式：更新已有记录
-    if (editRecordId) {
-      updateRecord(editRecordId, {
-        date,
-        meal,
-        foodId,
-        foodName: foodName,
-        reaction,
-        dayCount,
-        note: note.trim(),
-        categoryId: saveCategoryId,
-      });
+    try {
+      // 编辑模式：更新已有记录
+      if (editRecordId) {
+        await updateRecord(editRecordId, {
+          date,
+          meal,
+          foodId,
+          foodName: foodName,
+          reaction,
+          dayCount,
+          note: note.trim(),
+          categoryId: saveCategoryId,
+        });
+        resetForm();
+        onSaved();
+        onClose();
+        return;
+      }
+
+      // 新建模式：检查是否已有同日期+同食物的记录，如存在则更新（去重）
+      const existingRecord = getRecords().find(
+        r => r.date === date && r.foodId === foodId
+      );
+
+      if (existingRecord) {
+        await updateRecord(existingRecord.id, {
+          meal,
+          foodName: foodName,
+          reaction,
+          dayCount,
+          note: note.trim(),
+          categoryId: saveCategoryId,
+        });
+      } else {
+        await addRecord({
+          id: generateId(),
+          date,
+          meal,
+          foodId,
+          foodName: foodName,
+          reaction,
+          dayCount,
+          note: note.trim(),
+          createdAt: new Date().toISOString(),
+          categoryId: saveCategoryId,
+        });
+      }
+
       resetForm();
       onSaved();
       onClose();
-      return;
+    } catch {
+      // 错误已由全局提示展示
     }
-
-    // 新建模式：检查是否已有同日期+同食物的记录，如存在则更新（去重）
-    const existingRecord = getRecords().find(
-      r => r.date === date && r.foodId === foodId
-    );
-
-    if (existingRecord) {
-      // 更新已有记录
-      updateRecord(existingRecord.id, {
-        meal,
-        foodName: foodName,
-        reaction,
-        dayCount,
-        note: note.trim(),
-        categoryId: saveCategoryId,
-      });
-    } else {
-      // 新增记录
-      addRecord({
-        id: generateId(),
-        date,
-        meal,
-        foodId,
-        foodName: foodName,
-        reaction,
-        dayCount,
-        note: note.trim(),
-        createdAt: new Date().toISOString(),
-        categoryId: saveCategoryId,
-      });
-    }
-
-    resetForm();
-    onSaved();
-    onClose();
   };
 
   // ============ 删除 ============
@@ -351,21 +353,24 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
   };
 
   // 确认删除记录
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteConfirmId) return;
-    deleteRecord(deleteConfirmId);
-    // 如果正在编辑模式（isEditMode）或者删除的正是传入的编辑记录，关闭面板
-    const shouldClosePanel = isEditMode || deleteConfirmId === editRecordId;
-    setDeleteConfirmId(null);
-    setDeleteConfirmName('');
-    if (shouldClosePanel) {
-      resetForm();
-      onSaved();
-      onClose();
-    } else {
-      setShowHistory(false);
-      setTimeout(() => setShowHistory(true), 50);
-      onSaved();
+    try {
+      await deleteRecord(deleteConfirmId);
+      const shouldClosePanel = isEditMode || deleteConfirmId === editRecordId;
+      setDeleteConfirmId(null);
+      setDeleteConfirmName('');
+      if (shouldClosePanel) {
+        resetForm();
+        onSaved();
+        onClose();
+      } else {
+        setShowHistory(false);
+        setTimeout(() => setShowHistory(true), 50);
+        onSaved();
+      }
+    } catch {
+      // 错误已由全局提示展示
     }
   };
 

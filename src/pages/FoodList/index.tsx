@@ -315,20 +315,22 @@ const FoodList: React.FC<FoodListProps> = ({ onNavigateCategory }) => {
                   取消
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!removeConfirm) return;
                     const { id } = removeConfirm;
-                    // 删除所有相关记录
-                    const records = getRecords();
-                    const remaining = records.filter(r => r.foodId !== id);
-                    saveRecords(remaining);
-                    // 从预设列表中移除
-                    const presets = getPresetAllergens();
-                    if (presets.includes(id)) {
-                      savePresetAllergens(presets.filter(p => p !== id));
+                    try {
+                      const records = getRecords();
+                      const remaining = records.filter(r => r.foodId !== id);
+                      await saveRecords(remaining);
+                      const presets = getPresetAllergens();
+                      if (presets.includes(id)) {
+                        await savePresetAllergens(presets.filter(p => p !== id));
+                      }
+                      setRemoveConfirm(null);
+                      forceRefresh();
+                    } catch {
+                      // 错误已由全局提示展示
                     }
-                    setRemoveConfirm(null);
-                    forceRefresh();
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm"
                 >

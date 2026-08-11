@@ -3,10 +3,10 @@
 // ============================
 
 import * as XLSX from 'xlsx';
-import type { BabyProfile, FoodRecord } from '../types';
+import type { BabyProfile } from '../types';
 import { MEAL_OPTIONS, REACTION_OPTIONS, DAY_OPTIONS } from '../types';
 import { getFoodById } from '../config/foodConfig';
-import { getStats } from '../store';
+import { getStats, getRecords } from '../store';
 import { getMonthAge } from './date';
 
 /** 检测是否在微信内置浏览器中 */
@@ -30,7 +30,7 @@ export function isRestrictedBrowser(): boolean {
 function generateCSV(profile: BabyProfile): string {
   const stats = getStats();
   const age = getMonthAge(profile.birthday);
-  const records: FoodRecord[] = JSON.parse(localStorage.getItem('food_records') || '[]');
+  const records = getRecords();
   const sorted = [...records].sort(
     (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
   );
@@ -135,7 +135,7 @@ export async function exportToExcel(profile: BabyProfile) {
   ];
 
   // Sheet2: 辅食记录明细
-  const records: FoodRecord[] = JSON.parse(localStorage.getItem('food_records') || '[]');
+  const records = getRecords();
   const sorted = [...records].sort(
     (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
   );

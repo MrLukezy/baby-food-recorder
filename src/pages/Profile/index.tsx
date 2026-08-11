@@ -29,12 +29,15 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
   const avatarRef = useRef<HTMLInputElement>(null);
 
 
-  const handleDeleteRecord = useCallback(() => {
-    if (deleteConfirm) {
-      deleteRecord(deleteConfirm.recordId);
+  const handleDeleteRecord = useCallback(async () => {
+    if (!deleteConfirm) return;
+    try {
+      await deleteRecord(deleteConfirm.recordId);
       setDeleteConfirm(null);
       setExpandedFood(null);
       setRefreshKey(n => n + 1);
+    } catch {
+      // 错误已由全局提示展示
     }
   }, [deleteConfirm]);
 
@@ -116,7 +119,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
         const size = Math.min(200, img.width, img.height);
         canvas.width = size;
@@ -127,35 +130,50 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
         const sSize = Math.min(img.width, img.height);
         ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, size, size);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        const updated = updateProfile({ avatar: dataUrl });
-        if (updated) onUpdate(updated);
+        try {
+          const updated = await updateProfile({ avatar: dataUrl });
+          if (updated) onUpdate(updated);
+        } catch {
+          // 错误已由全局提示展示
+        }
       };
       img.src = ev.target?.result as string;
     };
     reader.readAsDataURL(file);
   }, [onUpdate]);
 
-  const handleSaveName = useCallback(() => {
+  const handleSaveName = useCallback(async () => {
     if (tempName.trim().length === 0) return;
-    const updated = updateProfile({ name: tempName.trim() });
-    if (updated) onUpdate(updated);
-    setEditingName(false);
+    try {
+      const updated = await updateProfile({ name: tempName.trim() });
+      if (updated) onUpdate(updated);
+      setEditingName(false);
+    } catch {
+      // 错误已由全局提示展示
+    }
   }, [tempName, onUpdate]);
 
-  const handleSaveBirthday = useCallback(() => {
-    const updated = updateProfile({ birthday: tempBirthday });
-    if (updated) onUpdate(updated);
-    setEditingBirthday(false);
+  const handleSaveBirthday = useCallback(async () => {
+    try {
+      const updated = await updateProfile({ birthday: tempBirthday });
+      if (updated) onUpdate(updated);
+      setEditingBirthday(false);
+    } catch {
+      // 错误已由全局提示展示
+    }
   }, [tempBirthday, onUpdate]);
 
   const handleExport = () => {
     exportToExcel(profile);
   };
 
-  const handleClearData = () => {
-    if (window.confirm('确定要清除所有数据吗？此操作不可恢复！')) {
-      clearAllData();
+  const handleClearData = async () => {
+    if (!window.confirm('确定要清除所有数据吗？此操作不可恢复！')) return;
+    try {
+      await clearAllData();
       onClearData();
+    } catch {
+      // 错误已由全局提示展示
     }
   };
 

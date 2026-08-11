@@ -46,9 +46,13 @@ const SelectFoods: React.FC<SelectFoodsProps> = ({ onBack, onDone }) => {
     });
   };
 
-  const handleDone = () => {
-    savePresetAllergens(Array.from(selectedIds));
-    onDone();
+  const handleDone = async () => {
+    try {
+      await savePresetAllergens(Array.from(selectedIds));
+      onDone();
+    } catch {
+      // 错误已由全局提示展示
+    }
   };
 
   return (
