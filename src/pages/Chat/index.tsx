@@ -474,12 +474,10 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
 
       {/* ============ 记忆管理浮层 ============ */}
       {showMemory && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowMemory(false)} />
-          <PullDownSheet
-            onClose={() => setShowMemory(false)}
-            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => setShowMemory(false)}
+          className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up"
+        >
             <div className="px-5 py-4 border-b border-amber-100 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-amber-900">🧠 AI 记忆库</h2>
@@ -527,7 +525,6 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
               💡 AI 的记忆保存在本地，不会上传到服务器，可随时删除。
             </div>
           </PullDownSheet>
-        </>
       )}
     </div>
   );

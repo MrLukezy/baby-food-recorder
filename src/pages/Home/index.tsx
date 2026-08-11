@@ -487,12 +487,10 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
 
       {/* 下次排敏推荐详情 */}
       {showRecPanel && recommendation?.foodName && recommendation.analysis && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowRecPanel(false)} />
-          <PullDownSheet
-            onClose={() => setShowRecPanel(false)}
-            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => setShowRecPanel(false)}
+          className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+        >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 下次排敏推荐
@@ -559,7 +557,6 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
               </div>
             </div>
           </PullDownSheet>
-        </>
       )}
 
       {/* 悬浮添加记录按钮（固定在底部 tab bar 上方） */}
@@ -584,12 +581,10 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
 
       {/* ============ 所有排敏记录浮层 ============ */}
       {showAllRecords && allRecordsData && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowAllRecords(false)} />
-          <PullDownSheet
-            onClose={() => setShowAllRecords(false)}
-            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => setShowAllRecords(false)}
+          className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+        >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">所有排敏记录</h2>
               <button onClick={() => setShowAllRecords(false)} className="text-gray-400 text-2xl">✕</button>
@@ -696,7 +691,6 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
               )}
             </div>
           </PullDownSheet>
-        </>
       )}
     </div>
   );

@@ -430,12 +430,10 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
 
       {/* ============ 查看所有排敏记录浮层 ============ */}
       {showRecords && allRecordsData && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => { setShowRecords(false); setStatFilter(null); }} />
-          <PullDownSheet
-            onClose={() => { setShowRecords(false); setStatFilter(null); }}
-            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => { setShowRecords(false); setStatFilter(null); }}
+          className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+        >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 {statFilter === 'safe' && '排敏完成（不过敏）'}
@@ -625,17 +623,14 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
               )}
             </div>
           </PullDownSheet>
-        </>
       )}
 
       {/* ============ 历史报错浮层 ============ */}
       {showLogs && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowLogs(false)} />
-          <PullDownSheet
-            onClose={() => setShowLogs(false)}
-            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => setShowLogs(false)}
+          className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+        >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 历史报错
@@ -725,7 +720,6 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
               ))}
             </div>
           </PullDownSheet>
-        </>
       )}
 
       {/* ============ 删除确认弹窗 ============ */}

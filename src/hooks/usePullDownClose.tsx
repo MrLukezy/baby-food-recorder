@@ -1,5 +1,6 @@
 // ============================
 // 半屏弹窗：滑到顶后继续下拉关闭
+// 通过 Portal 挂到 body，避免父级 transform 破坏 fixed 定位
 // ============================
 
 import {
@@ -10,6 +11,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 function findScrollable(sheet: HTMLElement, from: EventTarget | null): HTMLElement | null {
   let node = from instanceof HTMLElement ? from : null;
@@ -36,7 +38,6 @@ function findScrollable(sheet: HTMLElement, from: EventTarget | null): HTMLEleme
       return el;
     }
   }
-  // 整块面板自身可滚动（如 CategoryDetail）
   const selfStyle = window.getComputedStyle(sheet);
   if (
     (selfStyle.overflowY === 'auto' || selfStyle.overflowY === 'scroll' || sheet.classList.contains('overflow-y-auto')) &&
@@ -90,17 +91,14 @@ export function usePullDownClose(onClose: () => void, enabled = true) {
         const scrollEl = findScrollable(el, e.target);
         const atTop = !scrollEl || scrollEl.scrollTop <= 0;
 
-        // 内容未到顶：交给原生滚动
         if (!atTop) {
           ignoreRef.current = true;
           return;
         }
-        // 到顶后继续上滑（看下面内容）：交给原生滚动
         if (dy < 0) {
           ignoreRef.current = true;
           return;
         }
-        // 到顶后继续下拉：跟手拖面板
         pullingRef.current = true;
       }
 
@@ -157,22 +155,40 @@ export function usePullDownClose(onClose: () => void, enabled = true) {
   return { sheetRef, sheetStyle, offsetY };
 }
 
-/** 半屏底部弹层容器：支持滑到顶后下拉关闭 */
+/** 半屏底部弹层：Portal 到 body + 滑到顶下拉关闭 */
 export function PullDownSheet({
   onClose,
   className,
   children,
   enabled = true,
+  overlay = true,
+  overlayClassName = 'fixed inset-0 bg-black/40 z-[55]',
 }: {
   onClose: () => void;
   className?: string;
   children: ReactNode;
   enabled?: boolean;
+  /** 是否渲染遮罩（默认 true，已 Portal，无需在外层再写遮罩） */
+  overlay?: boolean;
+  overlayClassName?: string;
 }) {
   const { sheetRef, sheetStyle } = usePullDownClose(onClose, enabled);
-  return (
-    <div ref={sheetRef} style={sheetStyle} className={className} data-swipe-ignore="">
-      {children}
-    </div>
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <>
+      {overlay && (
+        <div
+          className={overlayClassName}
+          onClick={onClose}
+          data-swipe-ignore=""
+        />
+      )}
+      <div ref={sheetRef} style={sheetStyle} className={className} data-swipe-ignore="">
+        {children}
+      </div>
+    </>,
+    document.body,
   );
 }

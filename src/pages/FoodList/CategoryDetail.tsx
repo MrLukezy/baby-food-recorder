@@ -219,12 +219,11 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
 
       {/* 添加食材弹窗 */}
       {showAddForm && (
-        <>
-          <div className="fixed inset-0 bg-black/50 z-[55]" onClick={() => setShowAddForm(false)} />
-          <PullDownSheet
-            onClose={() => setShowAddForm(false)}
-            className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up max-h-[85vh] overflow-y-auto"
-          >
+        <PullDownSheet
+          onClose={() => setShowAddForm(false)}
+          overlayClassName="fixed inset-0 bg-black/50 z-[55]"
+          className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up max-h-[85vh] overflow-y-auto"
+        >
             <h3 className="text-lg font-bold text-amber-900 mb-4">
               ➕ 添加{category.icon}{category.name}食材
             </h3>
@@ -335,17 +334,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
               </button>
             </div>
           </PullDownSheet>
-        </>
       )}
 
       {/* 修改食材名称弹窗 */}
       {editFoodId && (
-        <>
-          <div className="fixed inset-0 bg-black/50 z-[55]" onClick={() => setEditFoodId(null)} />
-          <PullDownSheet
-            onClose={() => setEditFoodId(null)}
-            className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up"
-          >
+        <PullDownSheet
+          onClose={() => setEditFoodId(null)}
+          overlayClassName="fixed inset-0 bg-black/50 z-[55]"
+          className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up"
+        >
             <h3 className="text-lg font-bold text-amber-900 mb-4">
               ✏️ 修改食材名称
             </h3>
@@ -381,7 +378,6 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
               </button>
             </div>
           </PullDownSheet>
-        </>
       )}
 
       {/* 删除确认弹窗 */}

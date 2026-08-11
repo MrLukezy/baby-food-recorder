@@ -468,10 +468,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
   return (
     <>
-      {/* 遮罩层 */}
-      <div className="fixed inset-0 bg-black/40 z-[55]" onClick={handleCancel} />
-
-      {/* 面板 */}
+      {/* 遮罩 + 面板由 PullDownSheet Portal 到 body */}
       <PullDownSheet
         onClose={handleCancel}
         className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl max-h-[85vh] flex flex-col animate-slide-up"

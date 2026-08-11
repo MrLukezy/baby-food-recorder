@@ -241,7 +241,8 @@ export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
   }, [finishCommit, setOffset]);
 
   const contentStyle: CSSProperties = {
-    transform: `translate3d(${offsetX}px, 0, 0)`,
+    // 仅在有位移/过渡时设置 transform，避免固定弹层被父级 containing block 困住
+    transform: offsetX !== 0 || withTransition ? `translate3d(${offsetX}px, 0, 0)` : undefined,
     transition: withTransition ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
     willChange: dragging || withTransition ? 'transform' : undefined,
     touchAction: 'pan-y',
