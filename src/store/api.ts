@@ -20,7 +20,7 @@ export class ApiError extends Error {
 }
 
 function shouldReport(path: string): boolean {
-  return !path.startsWith('/client-logs') && !path.startsWith('/logs');
+  return !path.startsWith('/client-logs') && !path.startsWith('/logs') && !path.startsWith('/recommendation');
 }
 
 function reportApiFailure(message: string, path: string, status?: number) {

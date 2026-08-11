@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const foodDb = require('./food-database');
 const logger = require('./logger');
+const recommend = require('./recommend');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const PORT = 3003;
@@ -18,6 +19,7 @@ const FILES = {
   conversations: path.join(DATA_DIR, 'ai_conversations.json'),
   memories: path.join(DATA_DIR, 'ai_memories.json'),
   customFoods: path.join(DATA_DIR, 'custom_foods.json'),
+  recommendation: path.join(DATA_DIR, 'recommendation.json'),
 };
 
 // ======== 按文件串行的写队列 ========
@@ -349,6 +351,28 @@ const routes = {
     });
   },
 
+  'GET /api/recommendation': async (req, res) => {
+    const result = await recommend.getRecommendation({
+      profile: readJson(FILES.profile, null),
+      records: readJson(FILES.records, []),
+      presets: readJson(FILES.presets, []),
+      cache: readJson(FILES.recommendation, null),
+      apiKey: DEEPSEEK_KEY,
+      saveCache: (data) => writeJson(FILES.recommendation, data),
+    });
+    sendJson(res, 200, {
+      ok: true,
+      foodId: result.foodId,
+      foodName: result.foodName,
+      summary: result.summary,
+      analysis: result.analysis,
+      cycleKey: result.cycleKey,
+      shouldAutoOpen: !!result.shouldAutoOpen,
+      fromCache: !!result.fromCache,
+      createdAt: result.createdAt || null,
+    });
+  },
+
   'POST /api/deepseek/chat': async (req, res) => {
     const body = await parseBody(req);
     if (!DEEPSEEK_KEY) {
@@ -443,7 +467,7 @@ const server = http.createServer((req, res) => {
       } else if (status >= 400) {
         logger.warn('request client error', entry);
         logger.access(entry);
-      } else if (url.pathname !== '/api/health' && url.pathname !== '/api/logs') {
+      } else if (url.pathname !== '/api/health' && url.pathname !== '/api/logs' && url.pathname !== '/api/recommendation') {
         logger.access(entry);
       }
     }

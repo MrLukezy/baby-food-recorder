@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { BabyProfile, FoodRecord } from '../../types';
 import { getRecords, getStats, getRecordsByDate, getFoodAllergenStatus, getPresetAllergens, getRetestReminders } from '../../store';
+import { fetchRecommendation, type RecommendationResult } from '../../store/recommendation';
 import { foodCategories, getFoodEmoji, getAllFoods, getFoodById } from '../../config/foodConfig';
 import { today, getWeekDates, formatFriendlyDate, getMonthAge } from '../../utils/date';
 import RecordPanel from '../../components/RecordPanel';
@@ -37,6 +38,9 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [statFilter, setStatFilter] = useState<string | null>(null);
   const [showAllRecords, setShowAllRecords] = useState(false);
+  const [recommendation, setRecommendation] = useState<RecommendationResult | null>(null);
+  const [recLoading, setRecLoading] = useState(false);
+  const [showRecPanel, setShowRecPanel] = useState(false);
 
   const refreshData = useCallback(() => {
     setRecords(getRecordsByDate(selectedDate));
@@ -44,6 +48,26 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   }, [selectedDate]);
 
   useEffect(refreshData, [refreshData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecLoading(true);
+    fetchRecommendation()
+      .then((data) => {
+        if (cancelled) return;
+        setRecommendation(data);
+        if (data.foodName && data.analysis && data.shouldAutoOpen) {
+          setShowRecPanel(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRecommendation(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRecLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const weekDates = getWeekDates(new Date());
   const age = getMonthAge(profile.birthday);
@@ -390,6 +414,24 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
         {/* 食物排敏总览 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <h3 className="text-sm font-bold text-amber-800 mb-3">食物排敏总览</h3>
+
+          {(recLoading || recommendation?.foodName) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (recommendation?.foodName && recommendation.analysis) setShowRecPanel(true);
+              }}
+              disabled={recLoading || !recommendation?.analysis}
+              className="w-full mb-3 text-left rounded-xl px-3 py-2.5 bg-orange-50 border border-orange-100 hover:bg-orange-100/80 transition-colors disabled:opacity-70"
+            >
+              <p className="text-sm text-amber-900">
+                {recLoading && !recommendation?.foodName
+                  ? '推荐下次排敏：分析中…'
+                  : `推荐下次排敏：${recommendation?.foodName}（点击查看）`}
+              </p>
+            </button>
+          )}
+
           <div className="space-y-2">
             {categoryStats.map(cat => (
               <button
@@ -423,6 +465,66 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
           </div>
         </div>
       </div>
+
+      {/* 下次排敏推荐详情 */}
+      {showRecPanel && recommendation?.foodName && recommendation.analysis && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowRecPanel(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
+              <h2 className="text-lg font-bold text-amber-900">
+                下次排敏推荐
+              </h2>
+              <button onClick={() => setShowRecPanel(false)} className="text-gray-400 text-2xl">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div className="flex items-center gap-3 bg-orange-50 rounded-xl px-4 py-3">
+                <span className="text-3xl">{recommendation.foodId ? getFoodEmoji(recommendation.foodId) : '🍽️'}</span>
+                <div>
+                  <p className="text-base font-bold text-amber-900">{recommendation.foodName}</p>
+                  {recommendation.summary && (
+                    <p className="text-xs text-amber-600 mt-0.5">{recommendation.summary}</p>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-3">
+                {recommendation.analysis.split(/\n+/).filter(Boolean).map((para, i) => (
+                  <p key={i} className="text-sm text-amber-900/90 leading-relaxed whitespace-pre-wrap">
+                    {para}
+                  </p>
+                ))}
+              </div>
+              <p className="text-[11px] text-amber-400 pt-2">
+                分析结合宝宝历史排敏与过敏情况，仅供参考，不替代就医建议。
+              </p>
+            </div>
+            <div className="flex-shrink-0 px-5 py-4 border-t border-amber-100 flex gap-3"
+              style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <button
+                onClick={() => setShowRecPanel(false)}
+                className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
+              >
+                关闭
+              </button>
+              {recommendation.foodId && (
+                <button
+                  onClick={() => {
+                    setShowRecPanel(false);
+                    handleAddRecord({
+                      id: recommendation.foodId!,
+                      name: recommendation.foodName || recommendation.foodId!,
+                    });
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-orange-400 text-white font-medium text-sm"
+                >
+                  去记录
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 悬浮添加记录按钮（固定在底部 tab bar 上方） */}
       <button
