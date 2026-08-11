@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { acquireSheetLock } from './sheetLock';
 
 function findScrollable(sheet: HTMLElement, from: EventTarget | null): HTMLElement | null {
   let node = from instanceof HTMLElement ? from : null;
@@ -174,6 +175,11 @@ export function PullDownSheet({
 }) {
   const { sheetRef, sheetStyle } = usePullDownClose(onClose, enabled);
 
+  useEffect(() => {
+    if (!enabled) return;
+    return acquireSheetLock();
+  }, [enabled]);
+
   if (typeof document === 'undefined') return null;
 
   return createPortal(
@@ -183,9 +189,15 @@ export function PullDownSheet({
           className={overlayClassName}
           onClick={onClose}
           data-swipe-ignore=""
+          style={{ touchAction: 'none' }}
         />
       )}
-      <div ref={sheetRef} style={sheetStyle} className={className} data-swipe-ignore="">
+      <div
+        ref={sheetRef}
+        style={sheetStyle}
+        className={className}
+        data-swipe-ignore=""
+      >
         {children}
       </div>
     </>,

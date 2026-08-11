@@ -3,6 +3,7 @@
 // ============================
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { isSheetOpen, subscribeSheetLock } from './sheetLock';
 
 export interface PageFollowSwipeOptions {
   enabled?: boolean;
@@ -126,7 +127,7 @@ export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
 
     const onStart = (e: TouchEvent) => {
       const { enabled = true } = optsRef.current;
-      if (!enabled || animatingRef.current || e.touches.length !== 1) return;
+      if (!enabled || isSheetOpen() || animatingRef.current || e.touches.length !== 1) return;
       ignoreRef.current = shouldIgnoreSwipeTarget(e.target);
       if (ignoreRef.current) return;
 
@@ -139,6 +140,17 @@ export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
     };
 
     const onMove = (e: TouchEvent) => {
+      if (isSheetOpen()) {
+        // 半屏打开时彻底打断底层横滑
+        if (draggingRef.current) {
+          draggingRef.current = false;
+          setDragging(false);
+          setOffset(0, true);
+        }
+        ignoreRef.current = true;
+        lockedRef.current = 'none';
+        return;
+      }
       if (ignoreRef.current || animatingRef.current || e.touches.length !== 1) return;
       const t = e.touches[0];
       const dx = t.clientX - startXRef.current;
@@ -180,6 +192,14 @@ export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
     };
 
     const onEnd = () => {
+      if (isSheetOpen()) {
+        ignoreRef.current = false;
+        lockedRef.current = 'none';
+        draggingRef.current = false;
+        setDragging(false);
+        if (offsetRef.current !== 0) setOffset(0, true);
+        return;
+      }
       if (ignoreRef.current || animatingRef.current) {
         ignoreRef.current = false;
         lockedRef.current = 'none';
@@ -227,16 +247,29 @@ export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
       window.setTimeout(() => setWithTransition(false), 280);
     };
 
+    const onSheetLock = () => {
+      if (!isSheetOpen()) return;
+      ignoreRef.current = true;
+      lockedRef.current = 'none';
+      draggingRef.current = false;
+      setDragging(false);
+      if (offsetRef.current !== 0) {
+        setOffset(0, false);
+      }
+    };
+
     el.addEventListener('touchstart', onStart, { passive: true });
     el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd, { passive: true });
     el.addEventListener('touchcancel', onEnd, { passive: true });
+    const unsub = subscribeSheetLock(onSheetLock);
 
     return () => {
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
+      unsub();
     };
   }, [finishCommit, setOffset]);
 
