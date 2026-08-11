@@ -180,7 +180,7 @@ function extractJson(text) {
   return JSON.parse(body.slice(start, end + 1));
 }
 
-async function analyzeWithLlm(apiKey, context) {
+async function analyzeWithLlm(apiKey, context, excludedNames = []) {
   const system = `你是专业的婴幼儿辅食排敏顾问（参考 AAP / NHS / 中国卫健委辅食添加原则）。
 请根据宝宝历史排敏与过敏情况，从候选食物中选出「下一次最适合引入或继续观察」的一种食物，并给出专业分析。
 
@@ -192,13 +192,17 @@ async function analyzeWithLlm(apiKey, context) {
 5. 只返回 JSON，不要 markdown，字段：
 {"foodId":"...","foodName":"...","summary":"一句话推荐","analysis":"多段专业分析，用换行分段：现状判断、推荐理由、结合过敏史注意事项、建议吃法与观察要点"}`;
 
+  const excludedLine = excludedNames.length
+    ? `\n请勿再推荐这些已看过的食物：${excludedNames.join('、')}\n`
+    : '';
+
   const user = `宝宝：${context.babyName}，月龄约 ${context.monthAge ?? '未知'} 个月，生日 ${context.birthday || '未知'}
 
 已排敏（不过敏）：${context.safe.join('、') || '无'}
 排敏中：${context.observing.join('、') || '无'}
 疑似过敏：${context.suspected.join('、') || '无'}
 确认过敏：${context.allergic.join('、') || '无'}
-
+${excludedLine}
 近期记录：
 ${context.recentRecords.join('\n') || '无'}
 
@@ -251,11 +255,14 @@ async function getRecommendationInner(deps) {
   const records = Array.isArray(deps.records) ? deps.records : [];
   const presets = Array.isArray(deps.presets) ? deps.presets : [];
   const prev = deps.cache && typeof deps.cache === 'object' ? deps.cache : null;
+  const forceRefresh = !!deps.forceRefresh;
   const now = new Date();
   const nowIso = now.toISOString();
 
   const prevLastOpenAt = prev?.lastOpenAt || null;
-  const shouldAutoOpen = !prevLastOpenAt || (now.getTime() - new Date(prevLastOpenAt).getTime() >= TWO_HOURS_MS);
+  const shouldAutoOpen = forceRefresh
+    ? false
+    : (!prevLastOpenAt || (now.getTime() - new Date(prevLastOpenAt).getTime() >= TWO_HOURS_MS));
 
   const allFoods = foodDb.getAllFoods();
   const monthAge = getMonthAge(profile?.birthday);
@@ -263,13 +270,21 @@ async function getRecommendationInner(deps) {
   const fingerprint = buildFingerprint(statusMap, monthAge);
   const cycleKey = `${localDateKey(now)}__${fingerprint}`;
 
+  const excludeIds = new Set(
+    Array.isArray(deps.excludeIds) ? deps.excludeIds.filter(Boolean) : [],
+  );
+  // 同一周期内「推荐其他」累积排除；跨周期清空
+  if (prev && prev.cycleKey === cycleKey && Array.isArray(prev.excludedIds)) {
+    for (const id of prev.excludedIds) excludeIds.add(id);
+  }
+
   const baseMeta = {
     cycleKey,
     shouldAutoOpen,
-    lastOpenAt: nowIso,
+    lastOpenAt: forceRefresh ? (prev?.lastOpenAt || nowIso) : nowIso,
   };
 
-  if (prev && prev.cycleKey === cycleKey && prev.foodId && prev.analysis) {
+  if (!forceRefresh && prev && prev.cycleKey === cycleKey && prev.foodId && prev.analysis) {
     const next = {
       ...prev,
       ...baseMeta,
@@ -280,28 +295,34 @@ async function getRecommendationInner(deps) {
     return next;
   }
 
-  const candidates = buildCandidates(allFoods, statusMap, monthAge);
+  let candidates = buildCandidates(allFoods, statusMap, monthAge)
+    .filter(c => !excludeIds.has(c.id));
+
   if (candidates.length === 0) {
-    const empty = {
+    return {
       ...baseMeta,
       foodId: null,
       foodName: null,
       summary: null,
       analysis: null,
       createdAt: nowIso,
-      lastShownAt: shouldAutoOpen ? nowIso : null,
+      lastShownAt: null,
       fromCache: false,
+      noMore: true,
+      excludedIds: [...excludeIds],
+      message: '暂无其他可推荐食材',
     };
-    await deps.saveCache(empty);
-    return empty;
   }
 
   let result = null;
+  const excludedNames = [...excludeIds]
+    .map(id => allFoods.find(f => f.id === id)?.name || id)
+    .filter(Boolean);
   const context = summarizeContext(profile, records, statusMap, candidates, monthAge);
 
   if (deps.apiKey) {
     try {
-      const parsed = await analyzeWithLlm(deps.apiKey, context);
+      const parsed = await analyzeWithLlm(deps.apiKey, context, excludedNames);
       const allowed = new Set(candidates.map(c => c.id));
       if (parsed?.foodId && allowed.has(parsed.foodId)) {
         const food = candidates.find(c => c.id === parsed.foodId);
@@ -325,8 +346,8 @@ async function getRecommendationInner(deps) {
     result = fallbackPick(candidates, statusMap);
   }
 
-  // LLM 失败但有同日旧缓存且食物仍合理时降级
-  if ((!result || !result.analysis) && prev?.foodId && prev?.analysis) {
+  // LLM 失败：非「换一个」时可降级旧缓存；换一个时不要退回旧推荐
+  if ((!result || !result.analysis) && !forceRefresh && prev?.foodId && prev?.analysis) {
     const next = {
       ...prev,
       ...baseMeta,
@@ -338,6 +359,25 @@ async function getRecommendationInner(deps) {
     return next;
   }
 
+  if (!result || !result.analysis) {
+    return {
+      ...baseMeta,
+      foodId: null,
+      foodName: null,
+      summary: null,
+      analysis: null,
+      createdAt: nowIso,
+      lastShownAt: null,
+      fromCache: false,
+      noMore: true,
+      excludedIds: [...excludeIds],
+      message: '暂时无法生成新推荐，请稍后再试',
+    };
+  }
+
+  const nextExcluded = [...excludeIds];
+  // 当前这条保留在推荐位，不立刻加入排除；「推荐其他」时由调用方把旧 foodId 放进 excludeIds
+
   const next = {
     ...baseMeta,
     foodId: result.foodId,
@@ -345,8 +385,9 @@ async function getRecommendationInner(deps) {
     summary: result.summary,
     analysis: result.analysis,
     createdAt: nowIso,
-    lastShownAt: shouldAutoOpen ? nowIso : null,
+    lastShownAt: forceRefresh ? nowIso : (shouldAutoOpen ? nowIso : null),
     fromCache: false,
+    excludedIds: nextExcluded,
   };
   await deps.saveCache(next);
   return next;

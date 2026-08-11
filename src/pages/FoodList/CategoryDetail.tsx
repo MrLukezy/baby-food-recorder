@@ -7,6 +7,7 @@ import { foodCategories, addCustomFood, deleteCustomFood, updateCustomFood, getC
 import { hasRelatedSafeFood } from '../../config/relatedFoodGroups';
 import { getFoodAllergenStatus, getFoodEatCount, getRecords } from '../../store';
 import { REACTION_OPTIONS } from '../../types';
+import { PullDownSheet } from '../../hooks/usePullDownClose';
 
 interface CategoryDetailProps {
   categoryId: string;
@@ -220,7 +221,10 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
       {showAddForm && (
         <>
           <div className="fixed inset-0 bg-black/50 z-[55]" onClick={() => setShowAddForm(false)} />
-          <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up max-h-[85vh] overflow-y-auto">
+          <PullDownSheet
+            onClose={() => setShowAddForm(false)}
+            className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up max-h-[85vh] overflow-y-auto"
+          >
             <h3 className="text-lg font-bold text-amber-900 mb-4">
               ➕ 添加{category.icon}{category.name}食材
             </h3>
@@ -330,7 +334,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                 添加
               </button>
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
 
@@ -338,7 +342,10 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
       {editFoodId && (
         <>
           <div className="fixed inset-0 bg-black/50 z-[55]" onClick={() => setEditFoodId(null)} />
-          <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up">
+          <PullDownSheet
+            onClose={() => setEditFoodId(null)}
+            className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl p-6 animate-slide-up"
+          >
             <h3 className="text-lg font-bold text-amber-900 mb-4">
               ✏️ 修改食材名称
             </h3>
@@ -373,7 +380,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({ categoryId, onBack }) =
                 确认修改
               </button>
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
 

@@ -17,7 +17,7 @@ import CategoryDetail from './pages/FoodList/CategoryDetail';
 import ChatPage from './pages/Chat';
 import TabBar, { type TabKey } from './components/TabBar';
 import GlobalFeedback from './components/GlobalFeedback';
-import { useHorizontalSwipe } from './hooks/useHorizontalSwipe';
+import { usePageFollowSwipe } from './hooks/useHorizontalSwipe';
 
 type Page =
   | { type: 'boot' }
@@ -30,14 +30,16 @@ type Page =
 
 const TAB_ORDER: TabKey[] = ['home', 'calendar', 'food', 'profile'];
 
-/** Tab 页：左右横滑切换相邻 Tab */
+/** Tab 页：跟手横滑切换相邻 Tab（TabBar 不随页面移动） */
 function TabSwipeShell({
   activeTab,
   onChange,
+  tabBar,
   children,
 }: {
   activeTab: TabKey;
   onChange: (tab: TabKey) => void;
+  tabBar: ReactNode;
   children: ReactNode;
 }) {
   const activeRef = useRef(activeTab);
@@ -45,29 +47,37 @@ function TabSwipeShell({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  const swipeRef = useHorizontalSwipe<HTMLDivElement>({
-    onSwipeLeft: () => {
+  const { containerRef, contentStyle, dragging } = usePageFollowSwipe({
+    mode: 'both',
+    canSwipeLeft: () => {
       const i = TAB_ORDER.indexOf(activeRef.current);
-      if (i >= 0 && i < TAB_ORDER.length - 1) {
-        onChangeRef.current(TAB_ORDER[i + 1]);
-      }
+      return i >= 0 && i < TAB_ORDER.length - 1;
     },
-    onSwipeRight: () => {
+    canSwipeRight: () => TAB_ORDER.indexOf(activeRef.current) > 0,
+    onCommitLeft: () => {
       const i = TAB_ORDER.indexOf(activeRef.current);
-      if (i > 0) {
-        onChangeRef.current(TAB_ORDER[i - 1]);
-      }
+      if (i >= 0 && i < TAB_ORDER.length - 1) onChangeRef.current(TAB_ORDER[i + 1]);
+    },
+    onCommitRight: () => {
+      const i = TAB_ORDER.indexOf(activeRef.current);
+      if (i > 0) onChangeRef.current(TAB_ORDER[i - 1]);
     },
   });
 
   return (
-    <div ref={swipeRef} className="max-w-lg mx-auto relative min-h-screen">
-      {children}
+    <div
+      ref={containerRef}
+      className={`max-w-lg mx-auto relative min-h-screen overflow-x-hidden ${dragging ? 'select-none' : ''}`}
+    >
+      <div style={contentStyle} className="min-h-screen">
+        {children}
+      </div>
+      {tabBar}
     </div>
   );
 }
 
-/** 子页：从左往右滑退出 */
+/** 子页：右滑跟手退出 */
 function BackSwipeShell({
   onBack,
   children,
@@ -78,13 +88,21 @@ function BackSwipeShell({
   const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
 
-  const swipeRef = useHorizontalSwipe<HTMLDivElement>({
-    onSwipeRight: () => onBackRef.current(),
+  const { containerRef, contentStyle, dragging } = usePageFollowSwipe({
+    mode: 'right-only',
+    commitStyle: 'exit',
+    canSwipeRight: () => true,
+    onCommitRight: () => onBackRef.current(),
   });
 
   return (
-    <div ref={swipeRef} className="min-h-screen">
-      {children}
+    <div
+      ref={containerRef}
+      className={`min-h-screen overflow-x-hidden bg-[#FFF8F0] ${dragging ? 'select-none' : ''}`}
+    >
+      <div style={contentStyle} className="min-h-screen bg-[#FFF8F0]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -320,7 +338,11 @@ function App() {
   } else if (page.type === 'tab' && profile) {
     const activeTab = page.tab;
     content = (
-      <TabSwipeShell activeTab={activeTab} onChange={handleTabChange}>
+      <TabSwipeShell
+        activeTab={activeTab}
+        onChange={handleTabChange}
+        tabBar={<TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />}
+      >
         {activeTab === 'home' && (
           <Home profile={profile} onNavigateCategory={handleNavigateCategory} />
         )}
@@ -335,7 +357,6 @@ function App() {
             onClearData={handleClearData}
           />
         )}
-        <TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />
       </TabSwipeShell>
     );
   }

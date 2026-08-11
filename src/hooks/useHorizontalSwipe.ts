@@ -1,19 +1,30 @@
 // ============================
-// 横向滑动手势（Tab 切换 / 子页返回）
+// 跟手横滑（Tab 切换 / 子页返回）
 // ============================
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
-export interface HorizontalSwipeOptions {
-  /** 手指左滑（dx < 0） */
-  onSwipeLeft?: () => void;
-  /** 手指右滑（dx > 0） */
-  onSwipeRight?: () => void;
+export interface PageFollowSwipeOptions {
   enabled?: boolean;
-  /** 触发阈值（px） */
-  threshold?: number;
-  /** 水平需明显大于垂直，默认 1.2 */
-  directionRatio?: number;
+  /** both | right-only（子页返回） */
+  mode?: 'both' | 'right-only';
+  /** 能否继续左滑（切下一个） */
+  canSwipeLeft?: () => boolean;
+  /** 能否继续右滑（切上一个 / 返回） */
+  canSwipeRight?: () => boolean;
+  /** 确认左滑后的切换（在滑出动画结束后调用） */
+  onCommitLeft?: () => void;
+  /** 确认右滑后的切换 */
+  onCommitRight?: () => void;
+  /**
+   * switch: 滑出后换页再从对面滑入（Tab）
+   * exit: 滑出后直接卸载/返回（子页）
+   */
+  commitStyle?: 'switch' | 'exit';
+  /** 触发确认的位移比例（相对屏宽），默认 0.28 */
+  thresholdRatio?: number;
+  /** 最小触发位移 px */
+  minThreshold?: number;
 }
 
 function shouldIgnoreSwipeTarget(target: EventTarget | null): boolean {
@@ -32,7 +43,6 @@ function shouldIgnoreSwipeTarget(target: EventTarget | null): boolean {
       return true;
     }
 
-    // 全屏遮罩 / 底部浮层上不触发页面级横滑
     if (
       style.position === 'fixed' &&
       (node.classList.contains('inset-0') ||
@@ -47,83 +57,202 @@ function shouldIgnoreSwipeTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * 在元素上监听触摸横滑。返回 ref，挂到容器即可。
+ * 页面跟手横滑：拖动时 translateX 跟随手指，松手后滑出切换或回弹。
  */
-export function useHorizontalSwipe<T extends HTMLElement = HTMLDivElement>(
-  options: HorizontalSwipeOptions,
-): RefObject<T> {
-  const ref = useRef<T>(null!);
+export function usePageFollowSwipe(options: PageFollowSwipeOptions): {
+  containerRef: RefObject<HTMLDivElement>;
+  contentStyle: CSSProperties;
+  dragging: boolean;
+} {
   const optsRef = useRef(options);
   optsRef.current = options;
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+  const containerRef = useRef<HTMLDivElement>(null!);
+  const [offsetX, setOffsetX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [withTransition, setWithTransition] = useState(false);
 
-    let startX = 0;
-    let startY = 0;
-    let tracking = false;
-    let ignore = false;
+  const offsetRef = useRef(0);
+  const draggingRef = useRef(false);
+  const lockedRef = useRef<'none' | 'h' | 'v'>('none');
+  const animatingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startYRef = useRef(0);
+  const ignoreRef = useRef(false);
+  const widthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 375);
+
+  const setOffset = useCallback((x: number, transition: boolean) => {
+    offsetRef.current = x;
+    setWithTransition(transition);
+    setOffsetX(x);
+  }, []);
+
+  const finishCommit = useCallback((dir: 'left' | 'right') => {
+    const width = widthRef.current;
+    const target = dir === 'left' ? -width : width;
+    const style = optsRef.current.commitStyle || 'switch';
+    animatingRef.current = true;
+    setDragging(false);
+    draggingRef.current = false;
+    setOffset(target, true);
+
+    window.setTimeout(() => {
+      if (dir === 'left') optsRef.current.onCommitLeft?.();
+      else optsRef.current.onCommitRight?.();
+
+      if (style === 'exit') {
+        animatingRef.current = false;
+        setWithTransition(false);
+        return;
+      }
+
+      // 新页从对面滑入
+      setOffset(dir === 'left' ? width * 0.35 : -width * 0.35, false);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setOffset(0, true);
+          window.setTimeout(() => {
+            animatingRef.current = false;
+            setWithTransition(false);
+          }, 280);
+        });
+      });
+    }, 260);
+  }, [setOffset]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
 
     const onStart = (e: TouchEvent) => {
       const { enabled = true } = optsRef.current;
-      if (!enabled || e.touches.length !== 1) return;
+      if (!enabled || animatingRef.current || e.touches.length !== 1) return;
+      ignoreRef.current = shouldIgnoreSwipeTarget(e.target);
+      if (ignoreRef.current) return;
+
       const t = e.touches[0];
-      startX = t.clientX;
-      startY = t.clientY;
-      tracking = true;
-      ignore = shouldIgnoreSwipeTarget(e.target);
+      startXRef.current = t.clientX;
+      startYRef.current = t.clientY;
+      lockedRef.current = 'none';
+      widthRef.current = el.getBoundingClientRect().width || window.innerWidth;
+      setOffset(0, false);
     };
 
-    const onMove = (_e: TouchEvent) => {
-      // 不 preventDefault，避免打断纵向滚动；仅在结束时判定
-    };
+    const onMove = (e: TouchEvent) => {
+      if (ignoreRef.current || animatingRef.current || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startXRef.current;
+      const dy = t.clientY - startYRef.current;
 
-    const onEnd = (e: TouchEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      if (ignore) return;
+      if (lockedRef.current === 'none') {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dy) > Math.abs(dx) * 1.05) {
+          lockedRef.current = 'v';
+          return;
+        }
+        if (Math.abs(dx) > Math.abs(dy) * 1.05) {
+          lockedRef.current = 'h';
+          draggingRef.current = true;
+          setDragging(true);
+        } else {
+          return;
+        }
+      }
+
+      if (lockedRef.current !== 'h') return;
 
       const {
-        enabled = true,
-        threshold = 72,
-        directionRatio = 1.2,
-        onSwipeLeft,
-        onSwipeRight,
+        mode = 'both',
+        canSwipeLeft,
+        canSwipeRight,
       } = optsRef.current;
-      if (!enabled) return;
 
-      const t = e.changedTouches[0];
-      if (!t) return;
-      const dx = t.clientX - startX;
-      const dy = t.clientY - startY;
-      const absX = Math.abs(dx);
-      const absY = Math.abs(dy);
+      let next = dx;
+      if (mode === 'right-only' && next < 0) next = next * 0.18;
+      if (mode === 'both') {
+        if (next < 0 && canSwipeLeft && !canSwipeLeft()) next = next * 0.22;
+        if (next > 0 && canSwipeRight && !canSwipeRight()) next = next * 0.22;
+      }
 
-      if (absX < threshold) return;
-      if (absX < absY * directionRatio) return;
-
-      if (dx < 0) onSwipeLeft?.();
-      else onSwipeRight?.();
+      // 跟手
+      if (e.cancelable) e.preventDefault();
+      setOffset(next, false);
     };
 
-    const onCancel = () => {
-      tracking = false;
-      ignore = false;
+    const onEnd = () => {
+      if (ignoreRef.current || animatingRef.current) {
+        ignoreRef.current = false;
+        lockedRef.current = 'none';
+        return;
+      }
+
+      const wasHorizontal = lockedRef.current === 'h';
+      lockedRef.current = 'none';
+      ignoreRef.current = false;
+
+      if (!wasHorizontal || !draggingRef.current) {
+        draggingRef.current = false;
+        setDragging(false);
+        return;
+      }
+
+      const {
+        mode = 'both',
+        thresholdRatio = 0.28,
+        minThreshold = 64,
+        canSwipeLeft,
+        canSwipeRight,
+      } = optsRef.current;
+
+      const x = offsetRef.current;
+      const width = widthRef.current;
+      const threshold = Math.max(minThreshold, width * thresholdRatio);
+
+      const goLeft = x < -threshold && mode === 'both' && (!canSwipeLeft || canSwipeLeft());
+      const goRight = x > threshold && (!canSwipeRight || canSwipeRight()) && (mode === 'both' || mode === 'right-only');
+
+      if (goLeft) {
+        finishCommit('left');
+        return;
+      }
+      if (goRight) {
+        finishCommit('right');
+        return;
+      }
+
+      // 回弹
+      draggingRef.current = false;
+      setDragging(false);
+      setOffset(0, true);
+      window.setTimeout(() => setWithTransition(false), 280);
     };
 
     el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd, { passive: true });
-    el.addEventListener('touchcancel', onCancel, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
 
     return () => {
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onCancel);
+      el.removeEventListener('touchcancel', onEnd);
     };
-  }, []);
+  }, [finishCommit, setOffset]);
 
-  return ref;
+  const contentStyle: CSSProperties = {
+    transform: `translate3d(${offsetX}px, 0, 0)`,
+    transition: withTransition ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
+    willChange: dragging || withTransition ? 'transform' : undefined,
+    touchAction: 'pan-y',
+  };
+
+  return { containerRef, contentStyle, dragging };
+}
+
+/** @deprecated 保留兼容；新逻辑请用 usePageFollowSwipe */
+export function useHorizontalSwipe<T extends HTMLElement = HTMLDivElement>(
+  _options: { onSwipeLeft?: () => void; onSwipeRight?: () => void; enabled?: boolean },
+): RefObject<T> {
+  return useRef<T>(null!);
 }

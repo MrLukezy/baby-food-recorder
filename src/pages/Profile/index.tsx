@@ -10,6 +10,7 @@ import { getMonthAge } from '../../utils/date';
 import { exportToExcel, isWeChatBrowser } from '../../utils/export';
 import { getAllFoods, getFoodById } from '../../config/foodConfig';
 import { getFoodEmoji, foodCategories } from '../../config/foodConfig';
+import { PullDownSheet } from '../../hooks/usePullDownClose';
 
 type LogType = 'error' | 'app' | 'access';
 type LogEntry = Awaited<ReturnType<typeof fetchServerLogs>>['entries'][number];
@@ -431,7 +432,10 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       {showRecords && allRecordsData && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => { setShowRecords(false); setStatFilter(null); }} />
-          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+          <PullDownSheet
+            onClose={() => { setShowRecords(false); setStatFilter(null); }}
+            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+          >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 {statFilter === 'safe' && '排敏完成（不过敏）'}
@@ -620,7 +624,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                 </div>
               )}
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
 
@@ -628,7 +632,10 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
       {showLogs && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowLogs(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+          <PullDownSheet
+            onClose={() => setShowLogs(false)}
+            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+          >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 历史报错
@@ -717,7 +724,7 @@ const ProfilePage: React.FC<ProfileProps> = ({ profile, onUpdate, onClearData })
                 </div>
               ))}
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
 

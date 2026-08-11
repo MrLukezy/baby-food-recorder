@@ -370,6 +370,58 @@ const routes = {
       shouldAutoOpen: !!result.shouldAutoOpen,
       fromCache: !!result.fromCache,
       createdAt: result.createdAt || null,
+      noMore: !!result.noMore,
+      message: result.message || null,
+    });
+  },
+
+  'POST /api/recommendation/another': async (req, res) => {
+    const body = await parseBody(req).catch(() => ({}));
+    const cache = readJson(FILES.recommendation, null);
+    const excludeIds = [
+      ...(Array.isArray(cache?.excludedIds) ? cache.excludedIds : []),
+      cache?.foodId,
+      body?.excludeFoodId,
+    ].filter(Boolean);
+
+    const result = await recommend.getRecommendation({
+      profile: readJson(FILES.profile, null),
+      records: readJson(FILES.records, []),
+      presets: readJson(FILES.presets, []),
+      cache,
+      apiKey: DEEPSEEK_KEY,
+      forceRefresh: true,
+      excludeIds,
+      saveCache: (data) => writeJson(FILES.recommendation, {
+        ...data,
+        excludedIds: [...new Set([...(data.excludedIds || []), ...excludeIds])],
+      }),
+    });
+
+    if (result.noMore || !result.foodId) {
+      sendJson(res, 200, {
+        ok: false,
+        noMore: true,
+        message: result.message || '暂无其他可推荐食材',
+        foodId: cache?.foodId || null,
+        foodName: cache?.foodName || null,
+        summary: cache?.summary || null,
+        analysis: cache?.analysis || null,
+        shouldAutoOpen: false,
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      foodId: result.foodId,
+      foodName: result.foodName,
+      summary: result.summary,
+      analysis: result.analysis,
+      cycleKey: result.cycleKey,
+      shouldAutoOpen: false,
+      fromCache: false,
+      createdAt: result.createdAt || null,
     });
   },
 

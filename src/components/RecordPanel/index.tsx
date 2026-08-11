@@ -8,6 +8,7 @@ import { MEAL_OPTIONS, REACTION_OPTIONS } from '../../types';
 import { searchFoods, getAllFoods, getFoodById, foodCategories } from '../../config/foodConfig';
 import { addRecord, updateRecord, deleteRecord, getRecords, generateId, getObservingFoods, getSuspectedRetestDate, getFoodAllergenStatus } from '../../store';
 import { buildRelatedHint, type RelatedHint } from '../../config/relatedFoodGroups';
+import { PullDownSheet } from '../../hooks/usePullDownClose';
 
 import { today } from '../../utils/date';
 
@@ -471,7 +472,10 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
       <div className="fixed inset-0 bg-black/40 z-[55]" onClick={handleCancel} />
 
       {/* 面板 */}
-      <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl max-h-[85vh] flex flex-col animate-slide-up">
+      <PullDownSheet
+        onClose={handleCancel}
+        className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl max-h-[85vh] flex flex-col animate-slide-up"
+      >
         {/* 拖拽条 */}
         <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
           <div className="w-10 h-1 bg-gray-300 rounded-full" />
@@ -804,7 +808,7 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
             </div>
           )}
         </div>
-      </div>
+      </PullDownSheet>
 
       <DeleteConfirmPortal
         deleteConfirmId={deleteConfirmId}

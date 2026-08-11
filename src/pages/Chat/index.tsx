@@ -11,6 +11,7 @@ import {
   SYSTEM_PROMPT, buildBabyContext, getMemorySummary,
   addMemory, getMemories, deleteMemory,
 } from '../../utils/chatStore';
+import { PullDownSheet } from '../../hooks/usePullDownClose';
 
 interface ChatPageProps {
   onBack: () => void;
@@ -475,7 +476,10 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
       {showMemory && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowMemory(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up">
+          <PullDownSheet
+            onClose={() => setShowMemory(false)}
+            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up"
+          >
             <div className="px-5 py-4 border-b border-amber-100 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-amber-900">🧠 AI 记忆库</h2>
@@ -522,7 +526,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ onBack }) => {
             <div className="px-5 py-3 border-t border-amber-100 text-xs text-amber-400">
               💡 AI 的记忆保存在本地，不会上传到服务器，可随时删除。
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
     </div>

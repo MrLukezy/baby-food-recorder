@@ -5,10 +5,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { BabyProfile, FoodRecord } from '../../types';
 import { getRecords, getStats, getRecordsByDate, getFoodAllergenStatus, getPresetAllergens, getRetestReminders } from '../../store';
-import { fetchRecommendation, type RecommendationResult } from '../../store/recommendation';
+import { fetchRecommendation, fetchAnotherRecommendation, type RecommendationResult } from '../../store/recommendation';
 import { foodCategories, getFoodEmoji, getAllFoods, getFoodById } from '../../config/foodConfig';
 import { today, getWeekDates, formatFriendlyDate, getMonthAge } from '../../utils/date';
 import RecordPanel from '../../components/RecordPanel';
+import { PullDownSheet } from '../../hooks/usePullDownClose';
 
 interface HomeProps {
   profile: BabyProfile;
@@ -41,6 +42,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
   const [recommendation, setRecommendation] = useState<RecommendationResult | null>(null);
   const [recLoading, setRecLoading] = useState(false);
   const [showRecPanel, setShowRecPanel] = useState(false);
+  const [recAnotherLoading, setRecAnotherLoading] = useState(false);
 
   const refreshData = useCallback(() => {
     setRecords(getRecordsByDate(selectedDate));
@@ -187,6 +189,23 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
     setEditRecordId(food?.recordId ?? null);
     setShowPanel(true);
   };
+
+  const handleRecommendAnother = useCallback(async () => {
+    if (recAnotherLoading) return;
+    setRecAnotherLoading(true);
+    try {
+      const data = await fetchAnotherRecommendation(recommendation?.foodId);
+      if (!data.ok || !data.foodId || !data.analysis) {
+        alert(data.message || '暂无其他可推荐食材');
+        return;
+      }
+      setRecommendation(data);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '换推荐失败');
+    } finally {
+      setRecAnotherLoading(false);
+    }
+  }, [recAnotherLoading, recommendation?.foodId]);
 
   const statusLabel = (allergenStatus: string) =>
     allergenStatus === 'safe' ? '已排敏'
@@ -470,7 +489,10 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
       {showRecPanel && recommendation?.foodName && recommendation.analysis && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowRecPanel(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+          <PullDownSheet
+            onClose={() => setShowRecPanel(false)}
+            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+          >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">
                 下次排敏推荐
@@ -498,31 +520,45 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
                 分析结合宝宝历史排敏与过敏情况，仅供参考，不替代就医建议。
               </p>
             </div>
-            <div className="flex-shrink-0 px-5 py-4 border-t border-amber-100 flex gap-3"
+            <div className="flex-shrink-0 px-5 py-4 border-t border-amber-100 space-y-2"
               style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}
             >
               <button
-                onClick={() => setShowRecPanel(false)}
-                className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
+                type="button"
+                onClick={() => void handleRecommendAnother()}
+                disabled={recAnotherLoading}
+                className={`w-full py-2.5 rounded-xl font-medium text-sm border ${
+                  recAnotherLoading
+                    ? 'bg-amber-50 text-amber-300 border-amber-100 cursor-wait'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
               >
-                关闭
+                {recAnotherLoading ? '正在分析其他食材…' : '推荐其他'}
               </button>
-              {recommendation.foodId && (
+              <div className="flex gap-3">
                 <button
-                  onClick={() => {
-                    setShowRecPanel(false);
-                    handleAddRecord({
-                      id: recommendation.foodId!,
-                      name: recommendation.foodName || recommendation.foodId!,
-                    });
-                  }}
-                  className="flex-1 py-2.5 rounded-xl bg-orange-400 text-white font-medium text-sm"
+                  onClick={() => setShowRecPanel(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm"
                 >
-                  去记录
+                  关闭
                 </button>
-              )}
+                {recommendation.foodId && (
+                  <button
+                    onClick={() => {
+                      setShowRecPanel(false);
+                      handleAddRecord({
+                        id: recommendation.foodId!,
+                        name: recommendation.foodName || recommendation.foodId!,
+                      });
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-orange-400 text-white font-medium text-sm"
+                  >
+                    去记录
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
 
@@ -550,7 +586,10 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
       {showAllRecords && allRecordsData && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[55]" onClick={() => setShowAllRecords(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up">
+          <PullDownSheet
+            onClose={() => setShowAllRecords(false)}
+            className="fixed inset-x-0 bottom-0 z-[60] bg-white rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
+          >
             <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-amber-100">
               <h2 className="text-lg font-bold text-amber-900">所有排敏记录</h2>
               <button onClick={() => setShowAllRecords(false)} className="text-gray-400 text-2xl">✕</button>
@@ -656,7 +695,7 @@ const Home: React.FC<HomeProps> = ({ profile, onNavigateCategory }) => {
                 </div>
               )}
             </div>
-          </div>
+          </PullDownSheet>
         </>
       )}
     </div>
