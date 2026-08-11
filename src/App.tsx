@@ -17,6 +17,7 @@ import CategoryDetail from './pages/FoodList/CategoryDetail';
 import ChatPage from './pages/Chat';
 import TabBar, { type TabKey } from './components/TabBar';
 import GlobalFeedback from './components/GlobalFeedback';
+import { useHorizontalSwipe } from './hooks/useHorizontalSwipe';
 
 type Page =
   | { type: 'boot' }
@@ -26,6 +27,67 @@ type Page =
   | { type: 'tab'; tab: TabKey }
   | { type: 'category_detail'; categoryId: string }
   | { type: 'chat' };
+
+const TAB_ORDER: TabKey[] = ['home', 'calendar', 'food', 'profile'];
+
+/** Tab 页：左右横滑切换相邻 Tab */
+function TabSwipeShell({
+  activeTab,
+  onChange,
+  children,
+}: {
+  activeTab: TabKey;
+  onChange: (tab: TabKey) => void;
+  children: ReactNode;
+}) {
+  const activeRef = useRef(activeTab);
+  activeRef.current = activeTab;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const swipeRef = useHorizontalSwipe<HTMLDivElement>({
+    onSwipeLeft: () => {
+      const i = TAB_ORDER.indexOf(activeRef.current);
+      if (i >= 0 && i < TAB_ORDER.length - 1) {
+        onChangeRef.current(TAB_ORDER[i + 1]);
+      }
+    },
+    onSwipeRight: () => {
+      const i = TAB_ORDER.indexOf(activeRef.current);
+      if (i > 0) {
+        onChangeRef.current(TAB_ORDER[i - 1]);
+      }
+    },
+  });
+
+  return (
+    <div ref={swipeRef} className="max-w-lg mx-auto relative min-h-screen">
+      {children}
+    </div>
+  );
+}
+
+/** 子页：从左往右滑退出 */
+function BackSwipeShell({
+  onBack,
+  children,
+}: {
+  onBack: () => void;
+  children: ReactNode;
+}) {
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+
+  const swipeRef = useHorizontalSwipe<HTMLDivElement>({
+    onSwipeRight: () => onBackRef.current(),
+  });
+
+  return (
+    <div ref={swipeRef} className="min-h-screen">
+      {children}
+    </div>
+  );
+}
 
 function parseHash(hash: string): { type: 'tab'; tab: TabKey } | { type: 'category_detail'; categoryId: string } | { type: 'chat' } | null {
   const cleanHash = hash.replace('#', '');
@@ -233,24 +295,32 @@ function App() {
     content = <CreateBaby onNext={handleBabyCreated} />;
   } else if (page.type === 'onboarding_foods') {
     content = (
-      <SelectFoods
-        onBack={() => setPage({ type: 'onboarding_create' })}
-        onDone={handleFoodsDone}
-      />
+      <BackSwipeShell onBack={() => setPage({ type: 'onboarding_create' })}>
+        <SelectFoods
+          onBack={() => setPage({ type: 'onboarding_create' })}
+          onDone={handleFoodsDone}
+        />
+      </BackSwipeShell>
     );
   } else if (page.type === 'category_detail') {
     content = (
-      <CategoryDetail
-        categoryId={page.categoryId}
-        onBack={() => setPage({ type: 'tab', tab: 'food' })}
-      />
+      <BackSwipeShell onBack={() => setPage({ type: 'tab', tab: 'food' })}>
+        <CategoryDetail
+          categoryId={page.categoryId}
+          onBack={() => setPage({ type: 'tab', tab: 'food' })}
+        />
+      </BackSwipeShell>
     );
   } else if (page.type === 'chat') {
-    content = <ChatPage onBack={() => setPage({ type: 'tab', tab: 'home' })} />;
+    content = (
+      <BackSwipeShell onBack={() => setPage({ type: 'tab', tab: 'home' })}>
+        <ChatPage onBack={() => setPage({ type: 'tab', tab: 'home' })} />
+      </BackSwipeShell>
+    );
   } else if (page.type === 'tab' && profile) {
     const activeTab = page.tab;
     content = (
-      <div className="max-w-lg mx-auto relative">
+      <TabSwipeShell activeTab={activeTab} onChange={handleTabChange}>
         {activeTab === 'home' && (
           <Home profile={profile} onNavigateCategory={handleNavigateCategory} />
         )}
@@ -266,7 +336,7 @@ function App() {
           />
         )}
         <TabBar active={activeTab} onChange={handleTabChange} onOpenChat={handleOpenChat} />
-      </div>
+      </TabSwipeShell>
     );
   }
 

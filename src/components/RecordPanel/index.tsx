@@ -261,6 +261,8 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
 
   // ============ 保存 ============
 
+  const dayCountToNum = (d: DayCount) => Number(String(d).replace('day', '')) || 0;
+
   const handleSave = async () => {
     if (savingRef.current) return;
 
@@ -283,6 +285,48 @@ const RecordPanel: React.FC<RecordPanelProps> = ({ visible, defaultDate, prefill
     // 同类提示确认（先于同时排敏提醒）
     if (!isEditMode && hint?.requireConfirm) {
       if (!window.confirm(hint.confirmMessage)) return;
+    }
+
+    // 已排敏（不过敏）后再添加/修改：确认提示
+    const allergenStatus = getFoodAllergenStatus(foodId);
+    if (allergenStatus === 'safe') {
+      const actionLabel = isEditMode || editRecordId ? '修改' : '继续添加';
+      const confirmed = window.confirm(
+        `💡 排敏提醒\n\n` +
+        `「${foodName}」之前已经排过敏（不过敏）了。\n\n` +
+        `确认${actionLabel}信息吗？`
+      );
+      if (!confirmed) return;
+    }
+
+    // 天数往回标记（比该食物历史最大天数更小）：确认提示
+    const sameFoodRecords = getRecords().filter(r => r.foodId === foodId);
+    const sameDayExisting = !editRecordId
+      ? sameFoodRecords.find(r => r.date === date)
+      : null;
+    const excludeRecordId = editRecordId || sameDayExisting?.id || null;
+    const otherMaxDay = Math.max(
+      0,
+      ...sameFoodRecords
+        .filter(r => r.id !== excludeRecordId)
+        .map(r => dayCountToNum(r.dayCount)),
+    );
+    const editingOriginal = excludeRecordId
+      ? sameFoodRecords.find(r => r.id === excludeRecordId)
+      : null;
+    const baselineMaxDay = Math.max(
+      otherMaxDay,
+      editingOriginal ? dayCountToNum(editingOriginal.dayCount) : 0,
+    );
+    const newDayNum = dayCountToNum(dayCount);
+    if (baselineMaxDay > 0 && newDayNum < baselineMaxDay) {
+      const confirmed = window.confirm(
+        `💡 天数提醒\n\n` +
+        `「${foodName}」此前已标记到第 ${baselineMaxDay} 天，\n` +
+        `当前选择的是第 ${newDayNum} 天（比之前更早）。\n\n` +
+        `确认要这样保存吗？`
+      );
+      if (!confirmed) return;
     }
 
     // 同时排敏检测（仅新建时）
